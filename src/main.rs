@@ -52,6 +52,32 @@ fn collect_tests(tests_dir: &Path) -> anyhow::Result<Vec<TestCase>> {
     Ok(test_cases)
 }
 
+fn collect_rules(rules_dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
+    let mut rules: Vec<PathBuf> = Vec::new();
+    let dir_iter = std::fs::read_dir(rules_dir)
+        .with_context(|| format!("Reading the rules directory: {}", rules_dir.display()))?;
+
+    for dir_entry in dir_iter {
+        let dir_entry = dir_entry.context("Collecting a rule")?;
+        let file_type = dir_entry.file_type().context("Determining the file type of the rule")?;
+        if !file_type.is_file() {
+            continue
+        }
+        let rule_file = dir_entry.path();
+        match rule_file.extension() {
+            None => continue,
+            Some(ext) if ext != "conf" => continue,
+            _ => (),
+        }
+
+        rules.push(rule_file);
+    }
+
+    rules.sort();
+
+    Ok(rules)
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cwd = std::env::current_dir()?;
@@ -62,6 +88,12 @@ async fn main() -> anyhow::Result<()> {
         .context("Collecting all test cases")?;
     if test_cases.is_empty() {
         return Err(anyhow!("No test cases were found"));
+    }
+
+    let rules = collect_rules(&rules_dir)
+        .context("Collecting all rules")?;
+    if rules.is_empty() {
+        return Err(anyhow!("No rules were found"));
     }
 
     Ok(())
