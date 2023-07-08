@@ -5,6 +5,7 @@
 //! (first) and `output` (last) rules. Files in `/rules` are sorted lexicographically before
 //! concatenation.
 
+use std::collections::HashMap;
 use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
@@ -12,6 +13,7 @@ use std::path::PathBuf;
 use anyhow::anyhow;
 use anyhow::Context;
 
+use bollard::container::Config;
 use similar::TextDiff;
 
 const RULES_DIR: &'static str = "rules";
@@ -100,7 +102,13 @@ fn collect_rules(rules_dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
     Ok(rules)
 }
 
-fn run_logstash() -> anyhow::Result<()> {
+async fn run_logstash(
+    config_path: &Path,
+    pipeline_path: &Path,
+    input_path: &Path,
+    output_path: &Path,
+    docker: &bollard::Docker,
+) -> anyhow::Result<()> {
     // docker run --rm -i \
     //      -v {config.path()}:/usr/share/logstash/config/logstash.yml:ro \
     //      -v {pipeline.path()}:/usr/share/logstash/pipeline/logstash.conf:ro \
@@ -108,13 +116,54 @@ fn run_logstash() -> anyhow::Result<()> {
     //      {DOCKER_IMAGE} \
     //      < {input.path()} 2>/dev/null
 
+    let _response = docker
+        .create_container::<String, String>(
+            None,
+            Config {
+                image: Some(DOCKER_IMAGE.to_string()),
+                attach_stdout: Some(true),
+                attach_stderr: Some(true),
+                volumes: Some(
+                    [
+                        format!(
+                            "{}:/usr/share/logstash/config/logstash.yml:ro",
+                            config_path.display()
+                        ),
+                        format!(
+                            "{}:/usr/share/logstash/pipeline/logstash.conf:ro",
+                            pipeline_path.display()
+                        ),
+                        format!("{}:/input.json:ro", input_path.display()),
+                        format!("{}:/output.json", output_path.display()),
+                    ]
+                    .into_iter()
+                    .map(|k| (k, HashMap::default()))
+                    .collect(),
+                ),
+                ..Default::default()
+            },
+        )
+        .await?;
+
     Ok(())
 }
 
-fn run_test_case(test_case: &TestCase) -> anyhow::Result<()> {
+async fn run_test_case(
+    test_case: &TestCase,
+    config_path: &Path,
+    pipeline_path: &Path,
+    docker: &bollard::Docker,
+) -> anyhow::Result<()> {
     let output = tempfile::NamedTempFile::new()?;
 
-    run_logstash()?;
+    run_logstash(
+        config_path,
+        pipeline_path,
+        &test_case.input,
+        &test_case.output,
+        docker,
+    )
+    .await?;
 
     let expected_output_data = std::fs::read_to_string(&test_case.output)?;
     let output_data = std::fs::read_to_string(&output.path())?;
@@ -167,8 +216,10 @@ async fn main() -> anyhow::Result<()> {
     write!(pipeline_buffer, "{}", OUTPUT_RULE)?;
     let pipeline = pipeline_buffer.into_inner()?;
 
+    let docker = bollard::Docker::connect_with_local_defaults()?;
+
     for test_case in &test_cases {
-        run_test_case(test_case)?;
+        run_test_case(test_case, config.path(), pipeline.path(), &docker).await?;
     }
 
     // Close the files only at the end
