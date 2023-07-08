@@ -47,7 +47,8 @@ fn collect(tests_dir: &Path) -> anyhow::Result<Vec<TestCase>> {
     Ok(test_cases)
 }
 
-fn main() -> anyhow::Result<()> {
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
     let cwd = std::env::current_dir()?;
     let rules_dir = cwd.join(RULES_DIR);
     let tests_dir = cwd.join(TESTS_DIR);
