@@ -5,9 +5,9 @@
 //! (first) and `output` (last) rules. Files in `/rules` are sorted lexicographically before
 //! concatenation.
 
-use std::path::PathBuf;
-use std::path::Path;
 use std::io::Write;
+use std::path::Path;
+use std::path::PathBuf;
 
 use anyhow::anyhow;
 use anyhow::Context;
@@ -19,9 +19,14 @@ const TESTS_DIR: &'static str = "tests";
 const INPUT_FILE: &'static str = "input.json";
 const OUTPUT_FILE: &'static str = "output.json";
 const DOCKER_IMAGE: &'static str = "docker.elastic.co/logstash/logstash:8.5.3";
-const INPUT_RULE: &'static str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/logstash/input.conf"));
-const OUTPUT_RULE: &'static str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/logstash/output.conf"));
-const CONFIG: &'static str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/logstash/logstash.yml"));
+const INPUT_RULE: &'static str =
+    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/logstash/input.conf"));
+const OUTPUT_RULE: &'static str =
+    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/logstash/output.conf"));
+const CONFIG: &'static str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/logstash/logstash.yml"
+));
 
 #[derive(Debug)]
 struct TestCase {
@@ -36,18 +41,26 @@ fn collect_tests(tests_dir: &Path) -> anyhow::Result<Vec<TestCase>> {
 
     for dir_entry in dir_iter {
         let dir_entry = dir_entry.context("Collecting a test case")?;
-        let file_type = dir_entry.file_type().context("Determining the file type of the test case")?;
+        let file_type = dir_entry
+            .file_type()
+            .context("Determining the file type of the test case")?;
         if !file_type.is_dir() {
-            continue
+            continue;
         }
         let test_case_dir = dir_entry.path();
         let input_file = test_case_dir.join(INPUT_FILE);
         if !input_file.is_file() {
-            return Err(anyhow!("The input file was not found: {}", input_file.display()));
+            return Err(anyhow!(
+                "The input file was not found: {}",
+                input_file.display()
+            ));
         }
         let output_file = test_case_dir.join(OUTPUT_FILE);
         if !output_file.is_file() {
-            return Err(anyhow!("The output file was not found: {}", output_file.display()));
+            return Err(anyhow!(
+                "The output file was not found: {}",
+                output_file.display()
+            ));
         }
 
         test_cases.push(TestCase {
@@ -66,9 +79,11 @@ fn collect_rules(rules_dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
 
     for dir_entry in dir_iter {
         let dir_entry = dir_entry.context("Collecting a rule")?;
-        let file_type = dir_entry.file_type().context("Determining the file type of the rule")?;
+        let file_type = dir_entry
+            .file_type()
+            .context("Determining the file type of the rule")?;
         if !file_type.is_file() {
-            continue
+            continue;
         }
         let rule_file = dir_entry.path();
         match rule_file.extension() {
@@ -104,10 +119,7 @@ fn run_test_case(test_case: &TestCase) -> anyhow::Result<()> {
     let expected_output_data = std::fs::read_to_string(&test_case.output)?;
     let output_data = std::fs::read_to_string(&output.path())?;
 
-    let diff = TextDiff::from_lines(
-        &expected_output_data,
-        &output_data,
-        );
+    let diff = TextDiff::from_lines(&expected_output_data, &output_data);
 
     if diff.ratio() >= 1.0 {
         // Success case
@@ -127,14 +139,12 @@ async fn main() -> anyhow::Result<()> {
     let rules_dir = cwd.join(RULES_DIR);
     let tests_dir = cwd.join(TESTS_DIR);
 
-    let test_cases = collect_tests(&tests_dir)
-        .context("Collecting all test cases")?;
+    let test_cases = collect_tests(&tests_dir).context("Collecting all test cases")?;
     if test_cases.is_empty() {
         return Err(anyhow!("No test cases were found"));
     }
 
-    let rules = collect_rules(&rules_dir)
-        .context("Collecting all rules")?;
+    let rules = collect_rules(&rules_dir).context("Collecting all rules")?;
     if rules.is_empty() {
         return Err(anyhow!("No rules were found"));
     }
