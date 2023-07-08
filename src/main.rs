@@ -22,7 +22,7 @@ struct TestCase {
     output: PathBuf,
 }
 
-fn collect(tests_dir: &Path) -> anyhow::Result<Vec<TestCase>> {
+fn collect_tests(tests_dir: &Path) -> anyhow::Result<Vec<TestCase>> {
     let mut test_cases: Vec<TestCase> = Vec::new();
     let dir_iter = std::fs::read_dir(tests_dir)
         .with_context(|| format!("Reading the test cases directory: {}", tests_dir.display()))?;
@@ -58,13 +58,11 @@ async fn main() -> anyhow::Result<()> {
     let rules_dir = cwd.join(RULES_DIR);
     let tests_dir = cwd.join(TESTS_DIR);
 
-    let test_cases = collect(&tests_dir)
+    let test_cases = collect_tests(&tests_dir)
         .context("Collecting all test cases")?;
     if test_cases.is_empty() {
         return Err(anyhow!("No test cases were found"));
     }
-
-    println!("rules={}\ntests={}", rules_dir.display(), tests_dir.display());
 
     Ok(())
 }
