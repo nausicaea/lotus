@@ -171,9 +171,9 @@ async fn run_test_case(
     let diff = TextDiff::from_lines(&expected_output_data, &output_data);
 
     if diff.ratio() >= 1.0 {
-        // Success case
+        println!("Success!");
     } else {
-        // Failure case
+        eprintln!("Failure!");
     }
 
     // Close the files only at the end
