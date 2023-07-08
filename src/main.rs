@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use std::path::Path;
 
 use anyhow::anyhow;
+use anyhow::Context;
 
 const RULES_DIR: &'static str = "rules";
 const TESTS_DIR: &'static str = "tests";
@@ -23,9 +24,13 @@ struct TestCase {
 
 fn collect(tests_dir: &Path) -> anyhow::Result<Vec<TestCase>> {
     let mut test_cases: Vec<TestCase> = Vec::new();
-    for dir_entry in std::fs::read_dir(tests_dir)? {
-        let dir_entry = dir_entry?;
-        if !dir_entry.file_type()?.is_dir() {
+    let dir_iter = std::fs::read_dir(tests_dir)
+        .with_context(|| format!("Reading the test cases directory: {}", tests_dir.display()))?;
+
+    for dir_entry in dir_iter {
+        let dir_entry = dir_entry.context("Collecting a test case")?;
+        let file_type = dir_entry.file_type().context("Determining the file type of the test case")?;
+        if !file_type.is_dir() {
             continue
         }
         let test_case_dir = dir_entry.path();
@@ -53,7 +58,8 @@ async fn main() -> anyhow::Result<()> {
     let rules_dir = cwd.join(RULES_DIR);
     let tests_dir = cwd.join(TESTS_DIR);
 
-    let test_cases = collect(&tests_dir)?;
+    let test_cases = collect(&tests_dir)
+        .context("Collecting all test cases")?;
     if test_cases.is_empty() {
         return Err(anyhow!("No test cases were found"));
     }
