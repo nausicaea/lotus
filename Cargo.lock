@@ -609,6 +609,7 @@ dependencies = [
  "anyhow",
  "bollard",
  "clap",
+ "futures-util",
  "similar",
  "tempfile",
  "tokio",

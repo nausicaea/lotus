@@ -5,14 +5,15 @@
 //! (first) and `output` (last) rules. Files in `/rules` are sorted lexicographically before
 //! concatenation.
 
-use std::collections::HashMap;
 use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 
 use anyhow::{anyhow, Context};
-use bollard::container::Config;
+use bollard::container::{Config, LogsOptions};
+use bollard::models::HostConfig;
 use clap::Parser;
+use futures_util::stream::StreamExt;
 use similar::TextDiff;
 
 const RULES_DIR: &'static str = "rules";
@@ -27,6 +28,10 @@ const OUTPUT_RULE: &'static str =
 const CONFIG: &'static str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/logstash/logstash.yml"
+));
+const PIPELINE_CONFIG: &'static str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/logstash/pipelines.yml"
 ));
 
 #[derive(Debug)]
@@ -103,6 +108,7 @@ fn collect_rules(rules_dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
 
 async fn run_logstash(
     config_path: &Path,
+    pipeline_config_path: &Path,
     pipeline_path: &Path,
     input_path: &Path,
     output_path: &Path,
@@ -122,28 +128,46 @@ async fn run_logstash(
                 image: Some(DOCKER_IMAGE.to_string()),
                 attach_stdout: Some(true),
                 attach_stderr: Some(true),
-                volumes: Some(
-                    [
+                host_config: Some(HostConfig {
+                    auto_remove: Some(true),
+                    binds: Some(vec![
                         format!(
                             "{}:/usr/share/logstash/config/logstash.yml:ro",
                             config_path.display()
+                        ),
+                        format!(
+                            "{}:/usr/share/logstash/config/pipelines.yml:ro",
+                            pipeline_config_path.display()
                         ),
                         format!(
                             "{}:/usr/share/logstash/pipeline/logstash.conf:ro",
                             pipeline_path.display()
                         ),
                         format!("{}:/input.json:ro", input_path.display()),
-                        format!("{}:/output.json", output_path.display()),
-                    ]
-                    .into_iter()
-                    .map(|k| (k, HashMap::default()))
-                    .collect(),
-                ),
+                        format!("{}:/output.json:rw", output_path.display()),
+                    ]),
+                    ..Default::default()
+                }),
                 ..Default::default()
             },
         )
         .await?;
-    let _response = docker.start_container::<String>(&response.id, None).await?;
+
+    docker.start_container::<String>(&response.id, None).await?;
+
+    let mut log_stream = docker.logs::<String>(
+        &response.id,
+        Some(LogsOptions {
+            follow: true,
+            stdout: true,
+            stderr: true,
+            ..Default::default()
+        }),
+    );
+
+    while let Some(msg) = log_stream.next().await {
+        println!("{}", msg?);
+    }
 
     Ok(())
 }
@@ -151,6 +175,7 @@ async fn run_logstash(
 async fn run_test_case(
     test_case: &TestCase,
     config_path: &Path,
+    pipeline_config_path: &Path,
     pipeline_path: &Path,
     docker: &bollard::Docker,
 ) -> anyhow::Result<()> {
@@ -158,6 +183,7 @@ async fn run_test_case(
 
     run_logstash(
         config_path,
+        pipeline_config_path,
         pipeline_path,
         &test_case.input,
         &test_case.output,
@@ -224,6 +250,12 @@ async fn main() -> anyhow::Result<()> {
     write!(config_buffer, "{}", CONFIG)?;
     let config = config_buffer.into_inner()?;
 
+    // Write the Logstash pipeline config
+    let pipeline_config = tempfile::NamedTempFile::new()?;
+    let mut pipeline_config_buffer = std::io::BufWriter::new(pipeline_config);
+    write!(pipeline_config_buffer, "{}", PIPELINE_CONFIG)?;
+    let pipeline_config = pipeline_config_buffer.into_inner()?;
+
     // Write the Logstash pipeline
     let pipeline = tempfile::NamedTempFile::new()?;
     let mut pipeline_buffer = std::io::BufWriter::new(pipeline);
@@ -239,11 +271,19 @@ async fn main() -> anyhow::Result<()> {
     let docker = bollard::Docker::connect_with_local_defaults()?;
 
     for test_case in &test_cases {
-        run_test_case(test_case, config.path(), pipeline.path(), &docker).await?;
+        run_test_case(
+            test_case,
+            config.path(),
+            pipeline_config.path(),
+            pipeline.path(),
+            &docker,
+        )
+        .await?;
     }
 
     // Close the files only at the end
     pipeline.close()?;
+    pipeline_config.close()?;
     config.close()?;
 
     Ok(())
