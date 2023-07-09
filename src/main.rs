@@ -10,10 +10,9 @@ use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 
-use anyhow::anyhow;
-use anyhow::Context;
-
+use anyhow::{anyhow, Context};
 use bollard::container::Config;
+use clap::Parser;
 use similar::TextDiff;
 
 const RULES_DIR: &'static str = "rules";
@@ -116,7 +115,7 @@ async fn run_logstash(
     //      {DOCKER_IMAGE} \
     //      < {input.path()} 2>/dev/null
 
-    let _response = docker
+    let response = docker
         .create_container::<String, String>(
             None,
             Config {
@@ -144,6 +143,7 @@ async fn run_logstash(
             },
         )
         .await?;
+    let _response = docker.start_container::<String>(&response.id, None).await?;
 
     Ok(())
 }
@@ -173,7 +173,12 @@ async fn run_test_case(
     if diff.ratio() >= 1.0 {
         println!("Success!");
     } else {
-        eprintln!("Failure!");
+        eprintln!(
+            "{}",
+            diff.unified_diff()
+                .context_radius(10)
+                .header("expected", "actual")
+        );
     }
 
     // Close the files only at the end
@@ -182,9 +187,24 @@ async fn run_test_case(
     Ok(())
 }
 
+#[derive(Debug, Parser)]
+#[command(author, version, about, long_about = None)]
+struct Arguments {
+    /// Optional project path (e.g. the path to a directory containing `config` and `tests`
+    /// subdirectories)
+    project_dir: Option<PathBuf>,
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let cwd = std::env::current_dir()?;
+    let args = Arguments::parse();
+
+    let cwd = if let Some(project_dir) = args.project_dir {
+        project_dir
+    } else {
+        std::env::current_dir()?
+    };
+
     let rules_dir = cwd.join(RULES_DIR);
     let tests_dir = cwd.join(TESTS_DIR);
 
