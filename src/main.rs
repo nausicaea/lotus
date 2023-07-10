@@ -6,21 +6,27 @@
 //! concatenation.
 
 use std::io::Write;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::Path;
 use std::path::PathBuf;
 
 use anyhow::{anyhow, Context};
 use bollard::container::{Config, LogsOptions};
 use bollard::models::HostConfig;
+use bollard::models::PortBinding;
 use clap::Parser;
 use futures_util::stream::StreamExt;
 use similar::TextDiff;
 
+const LOCALHOST: IpAddr = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
 const RULES_DIR: &'static str = "rules";
 const TESTS_DIR: &'static str = "tests";
 const INPUT_FILE: &'static str = "input.json";
 const OUTPUT_FILE: &'static str = "output.json";
 const DOCKER_IMAGE: &'static str = "docker.elastic.co/logstash/logstash:8.5.3";
+const RULE_EXTENSION: &'static str = "conf";
+const INPUT_PORT: u16 = 5066;
+const OUTPUT_PORT: u16 = 5067;
 const INPUT_RULE: &'static str =
     include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/logstash/input.conf"));
 const OUTPUT_RULE: &'static str =
@@ -38,6 +44,11 @@ const PIPELINE_CONFIG: &'static str = include_str!(concat!(
 struct TestCase {
     input: PathBuf,
     output: PathBuf,
+}
+
+#[derive(Debug)]
+struct Container {
+    id: String,
 }
 
 fn collect_tests(tests_dir: &Path) -> anyhow::Result<Vec<TestCase>> {
@@ -94,7 +105,7 @@ fn collect_rules(rules_dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
         let rule_file = dir_entry.path();
         match rule_file.extension() {
             None => continue,
-            Some(ext) if ext != "conf" => continue,
+            Some(ext) if ext != RULE_EXTENSION => continue,
             _ => (),
         }
 
@@ -106,21 +117,12 @@ fn collect_rules(rules_dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
     Ok(rules)
 }
 
-async fn run_logstash(
+async fn spawn_logstash(
+    docker: &bollard::Docker,
     config_path: &Path,
     pipeline_config_path: &Path,
     pipeline_path: &Path,
-    input_path: &Path,
-    output_path: &Path,
-    docker: &bollard::Docker,
-) -> anyhow::Result<()> {
-    // docker run --rm -i \
-    //      -v {config.path()}:/usr/share/logstash/config/logstash.yml:ro \
-    //      -v {pipeline.path()}:/usr/share/logstash/pipeline/logstash.conf:ro \
-    //      -v {output.path()}:/output.json \
-    //      {DOCKER_IMAGE} \
-    //      < {input.path()} 2>/dev/null
-
+) -> anyhow::Result<Container> {
     let response = docker
         .create_container::<String, String>(
             None,
@@ -128,8 +130,28 @@ async fn run_logstash(
                 image: Some(DOCKER_IMAGE.to_string()),
                 attach_stdout: Some(true),
                 attach_stderr: Some(true),
+                exposed_ports: Some(
+                    [INPUT_PORT, OUTPUT_PORT]
+                        .into_iter()
+                        .map(|p| (format!("{}/tcp", p), std::collections::HashMap::default()))
+                        .collect(),
+                ),
                 host_config: Some(HostConfig {
                     auto_remove: Some(true),
+                    port_bindings: Some(
+                        [INPUT_PORT, OUTPUT_PORT]
+                            .into_iter()
+                            .map(|p| {
+                                (
+                                    format!("{}/tcp", p),
+                                    Some(vec![PortBinding {
+                                        host_ip: Some(LOCALHOST.to_string()),
+                                        host_port: Some(format!("{}/tcp", p)),
+                                    }]),
+                                )
+                            })
+                            .collect(),
+                    ),
                     binds: Some(vec![
                         format!(
                             "{}:/usr/share/logstash/config/logstash.yml:ro",
@@ -143,8 +165,6 @@ async fn run_logstash(
                             "{}:/usr/share/logstash/pipeline/logstash.conf:ro",
                             pipeline_path.display()
                         ),
-                        format!("{}:/input.json:ro", input_path.display()),
-                        format!("{}:/output.json:rw", output_path.display()),
                     ]),
                     ..Default::default()
                 }),
@@ -155,8 +175,12 @@ async fn run_logstash(
 
     docker.start_container::<String>(&response.id, None).await?;
 
+    Ok(Container { id: response.id })
+}
+
+async fn monitor(docker: &bollard::Docker, container_id: &str) -> anyhow::Result<()> {
     let mut log_stream = docker.logs::<String>(
-        &response.id,
+        container_id,
         Some(LogsOptions {
             follow: true,
             stdout: true,
@@ -166,30 +190,17 @@ async fn run_logstash(
     );
 
     while let Some(msg) = log_stream.next().await {
-        println!("{}", msg?);
+        let msg = msg.map(|m| m.to_string())?;
+        println!("{}", msg);
     }
 
     Ok(())
 }
 
-async fn run_test_case(
-    test_case: &TestCase,
-    config_path: &Path,
-    pipeline_config_path: &Path,
-    pipeline_path: &Path,
-    docker: &bollard::Docker,
-) -> anyhow::Result<()> {
+async fn run_test_case(test_case: &TestCase) -> anyhow::Result<()> {
     let output = tempfile::NamedTempFile::new()?;
 
-    run_logstash(
-        config_path,
-        pipeline_config_path,
-        pipeline_path,
-        &test_case.input,
-        &test_case.output,
-        docker,
-    )
-    .await?;
+    todo!();
 
     let expected_output_data = std::fs::read_to_string(&test_case.output)?;
     let output_data = std::fs::read_to_string(&output.path())?;
@@ -270,16 +281,24 @@ async fn main() -> anyhow::Result<()> {
 
     let docker = bollard::Docker::connect_with_local_defaults()?;
 
+    let container = spawn_logstash(
+        &docker,
+        config.path(),
+        pipeline_config.path(),
+        pipeline.path(),
+    )
+    .await?;
+
+    let mut input_stream =
+        tokio::net::TcpStream::connect(SocketAddr::new(LOCALHOST, INPUT_PORT)).await?;
+    let mut output_stream =
+        tokio::net::TcpStream::connect(SocketAddr::new(LOCALHOST, OUTPUT_PORT)).await?;
+
     for test_case in &test_cases {
-        run_test_case(
-            test_case,
-            config.path(),
-            pipeline_config.path(),
-            pipeline.path(),
-            &docker,
-        )
-        .await?;
+        run_test_case(test_case).await?;
     }
+
+    docker.stop_container(&container.id, None).await?;
 
     // Close the files only at the end
     pipeline.close()?;
