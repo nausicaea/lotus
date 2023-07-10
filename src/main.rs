@@ -17,16 +17,20 @@ use bollard::models::PortBinding;
 use clap::Parser;
 use futures_util::stream::StreamExt;
 use similar::TextDiff;
+use tokio::net::TcpStream;
+use tokio::time::sleep;
 
 const LOCALHOST: IpAddr = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
+const INPUT_PORT: u16 = 5066;
+const OUTPUT_PORT: u16 = 5067;
+const INPUT_SOCKET: SocketAddr = SocketAddr::new(LOCALHOST, INPUT_PORT);
+const OUTPUT_SOCKET: SocketAddr = SocketAddr::new(LOCALHOST, OUTPUT_PORT);
 const RULES_DIR: &'static str = "rules";
 const TESTS_DIR: &'static str = "tests";
 const INPUT_FILE: &'static str = "input.json";
 const OUTPUT_FILE: &'static str = "output.json";
 const DOCKER_IMAGE: &'static str = "docker.elastic.co/logstash/logstash:8.5.3";
 const RULE_EXTENSION: &'static str = "conf";
-const INPUT_PORT: u16 = 5066;
-const OUTPUT_PORT: u16 = 5067;
 const INPUT_RULE: &'static str =
     include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/logstash/input.conf"));
 const OUTPUT_RULE: &'static str =
@@ -289,10 +293,60 @@ async fn main() -> anyhow::Result<()> {
     )
     .await?;
 
-    let mut input_stream =
-        tokio::net::TcpStream::connect(SocketAddr::new(LOCALHOST, INPUT_PORT)).await?;
-    let mut output_stream =
-        tokio::net::TcpStream::connect(SocketAddr::new(LOCALHOST, OUTPUT_PORT)).await?;
+    let max_retries = 10;
+    let retry_delay = std::time::Duration::from_secs(5);
+
+    let mut output_stream: Option<TcpStream> = None;
+    let mut output_retries = 0;
+    loop {
+        match TcpStream::connect(OUTPUT_SOCKET).await {
+            Ok(ostr) => {
+                output_stream = Some(ostr);
+                break;
+            }
+            Err(e) => {
+                // Connection failed
+                output_retries += 1;
+                if output_retries >= max_retries {
+                    println!("Failed to connect after {} retries.", max_retries);
+                    break;
+                }
+                println!(
+                    "Attempt {}. Error: {}. Retrying in {} seconds...",
+                    output_retries,
+                    e,
+                    retry_delay.as_secs()
+                );
+                sleep(retry_delay).await;
+            }
+        }
+    }
+
+    let mut input_stream: Option<TcpStream> = None;
+    let mut input_retries = 0;
+    loop {
+        match TcpStream::connect(INPUT_SOCKET).await {
+            Ok(istr) => {
+                input_stream = Some(istr);
+                break;
+            }
+            Err(e) => {
+                // Connection failed
+                input_retries += 1;
+                if input_retries >= max_retries {
+                    println!("Failed to connect after {} retries.", max_retries);
+                    break;
+                }
+                println!(
+                    "Attempt {}. Error: {}. Retrying in {} seconds...",
+                    input_retries,
+                    e,
+                    retry_delay.as_secs()
+                );
+                sleep(retry_delay).await;
+            }
+        }
+    }
 
     for test_case in &test_cases {
         run_test_case(test_case).await?;
