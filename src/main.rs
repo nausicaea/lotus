@@ -5,10 +5,13 @@
 //! (first) and `output` (last) rules. Files in `/rules` are sorted lexicographically before
 //! concatenation.
 
+use std::fs::File;
 use std::io::Write;
+use std::io::{self, Read};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::Path;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use anyhow::{anyhow, Context};
 use bollard::container::{Config, LogsOptions};
@@ -17,14 +20,18 @@ use bollard::models::PortBinding;
 use clap::Parser;
 use futures_util::stream::StreamExt;
 use similar::TextDiff;
+use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 use tokio::time::sleep;
 
+const BUFFER_SIZE: usize = 4096;
 const LOCALHOST: IpAddr = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
 const INPUT_PORT: u16 = 5066;
 const OUTPUT_PORT: u16 = 5067;
+const API_PORT: u16 = 9600;
 const INPUT_SOCKET: SocketAddr = SocketAddr::new(LOCALHOST, INPUT_PORT);
 const OUTPUT_SOCKET: SocketAddr = SocketAddr::new(LOCALHOST, OUTPUT_PORT);
+const API_SOCKET: SocketAddr = SocketAddr::new(LOCALHOST, API_PORT);
 const RULES_DIR: &'static str = "rules";
 const TESTS_DIR: &'static str = "tests";
 const INPUT_FILE: &'static str = "input.json";
@@ -135,15 +142,15 @@ async fn spawn_logstash(
                 attach_stdout: Some(true),
                 attach_stderr: Some(true),
                 exposed_ports: Some(
-                    [INPUT_PORT, OUTPUT_PORT]
+                    [INPUT_PORT, OUTPUT_PORT, API_PORT]
                         .into_iter()
                         .map(|p| (format!("{}/tcp", p), std::collections::HashMap::default()))
                         .collect(),
                 ),
                 host_config: Some(HostConfig {
-                    auto_remove: Some(true),
+                    auto_remove: Some(false),
                     port_bindings: Some(
-                        [INPUT_PORT, OUTPUT_PORT]
+                        [INPUT_PORT, OUTPUT_PORT, API_PORT]
                             .into_iter()
                             .map(|p| {
                                 (
@@ -201,14 +208,89 @@ async fn monitor(docker: &bollard::Docker, container_id: &str) -> anyhow::Result
     Ok(())
 }
 
-async fn run_test_case(test_case: &TestCase) -> anyhow::Result<()> {
-    let output = tempfile::NamedTempFile::new()?;
+async fn stream_write<const B: usize>(
+    file_path: &Path,
+    stream: &mut TcpStream,
+) -> anyhow::Result<()> {
+    // Open the local file for reading
+    let mut file = File::open(file_path)?;
 
-    todo!();
+    // Create a buffer to hold the file contents
+    let mut buffer = [0u8; B];
+
+    // Read chunks from the file and write them to the TcpStream
+    loop {
+        let bytes_read = file.read(&mut buffer[..])?;
+        if bytes_read == 0 {
+            // End of file reached
+            break;
+        }
+
+        let mut bytes_written = 0;
+        loop {
+            // Wait for the socket to be writable
+            stream.writable().await?;
+
+            // Try to write data, this may still fail with `WouldBlock`
+            // if the readiness event is a false positive.
+            match stream.try_write(&buffer[bytes_written..bytes_read]) {
+                Ok(n) if n >= bytes_read => break,
+                Ok(n) => {
+                    bytes_written += n;
+                }
+                Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => break,
+                Err(e) => {
+                    return Err(e.into());
+                }
+            }
+        }
+    }
+
+    // Flush any remaining data in the TcpStream
+    stream.flush().await?;
+
+    Ok(())
+}
+
+async fn stream_read<const B: usize>(stream: &TcpStream) -> anyhow::Result<String> {
+    let mut output: Vec<u8> = Vec::new();
+
+    let mut buffer = [0u8; B];
+
+    let mut bytes_read = 0;
+    loop {
+        stream.readable().await?;
+
+        match stream.try_read(&mut buffer[bytes_read..]) {
+            Ok(0) => break,
+            Ok(n) => {
+                output.extend_from_slice(&buffer[..n]);
+                bytes_read += n;
+            }
+            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+                continue;
+            }
+            Err(e) => {
+                return Err(e.into());
+            }
+        }
+    }
+
+    let output = String::from_utf8(output)?;
+
+    Ok(output)
+}
+
+async fn run_test_case(
+    test_case: &TestCase,
+    input_stream: &mut TcpStream,
+    output_stream: &TcpStream,
+) -> anyhow::Result<()> {
+    stream_write::<BUFFER_SIZE>(&test_case.input, input_stream).await?;
+    sleep(Duration::from_secs(60)).await;
+    let output_data = stream_read::<BUFFER_SIZE>(output_stream).await?;
 
     let expected_output_data = std::fs::read_to_string(&test_case.output)?;
-    let output_data = std::fs::read_to_string(&output.path())?;
-
     let diff = TextDiff::from_lines(&expected_output_data, &output_data);
 
     if diff.ratio() >= 1.0 {
@@ -222,10 +304,29 @@ async fn run_test_case(test_case: &TestCase) -> anyhow::Result<()> {
         );
     }
 
-    // Close the files only at the end
-    output.close()?;
-
     Ok(())
+}
+
+async fn connect_with_retries(
+    socket: SocketAddr,
+    retries: usize,
+    delay: Duration,
+) -> anyhow::Result<TcpStream> {
+    let mut curr_retries = 0;
+    loop {
+        match TcpStream::connect(socket).await {
+            Ok(strm) => {
+                return Ok(strm);
+            }
+            Err(_) => {
+                curr_retries += 1;
+                if curr_retries >= retries {
+                    return Err(anyhow!("Failed to connect after {} retries.", retries));
+                }
+                sleep(delay).await;
+            }
+        }
+    }
 }
 
 #[derive(Debug, Parser)]
@@ -294,63 +395,19 @@ async fn main() -> anyhow::Result<()> {
     .await?;
 
     let max_retries = 10;
-    let retry_delay = std::time::Duration::from_secs(5);
+    let retry_delay = Duration::from_secs(5);
+    let mut output_stream = connect_with_retries(OUTPUT_SOCKET, max_retries, retry_delay).await?;
+    let mut input_stream = connect_with_retries(INPUT_SOCKET, max_retries, retry_delay).await?;
 
-    let mut output_stream: Option<TcpStream> = None;
-    let mut output_retries = 0;
     loop {
-        match TcpStream::connect(OUTPUT_SOCKET).await {
-            Ok(ostr) => {
-                output_stream = Some(ostr);
-                break;
-            }
-            Err(e) => {
-                // Connection failed
-                output_retries += 1;
-                if output_retries >= max_retries {
-                    println!("Failed to connect after {} retries.", max_retries);
-                    break;
-                }
-                println!(
-                    "Attempt {}. Error: {}. Retrying in {} seconds...",
-                    output_retries,
-                    e,
-                    retry_delay.as_secs()
-                );
-                sleep(retry_delay).await;
-            }
+        let output_data = stream_read::<BUFFER_SIZE>(&output_stream).await?;
+        if !output_data.is_empty() {
+            println!("{}", output_data);
         }
     }
-
-    let mut input_stream: Option<TcpStream> = None;
-    let mut input_retries = 0;
-    loop {
-        match TcpStream::connect(INPUT_SOCKET).await {
-            Ok(istr) => {
-                input_stream = Some(istr);
-                break;
-            }
-            Err(e) => {
-                // Connection failed
-                input_retries += 1;
-                if input_retries >= max_retries {
-                    println!("Failed to connect after {} retries.", max_retries);
-                    break;
-                }
-                println!(
-                    "Attempt {}. Error: {}. Retrying in {} seconds...",
-                    input_retries,
-                    e,
-                    retry_delay.as_secs()
-                );
-                sleep(retry_delay).await;
-            }
-        }
-    }
-
-    for test_case in &test_cases {
-        run_test_case(test_case).await?;
-    }
+    //for test_case in &test_cases {
+    //    run_test_case(test_case, &mut input_stream, &mut output_stream).await?;
+    //}
 
     docker.stop_container(&container.id, None).await?;
 
