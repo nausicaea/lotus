@@ -6,6 +6,7 @@
 //! concatenation.
 
 use std::fs::File;
+use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::io::{self, Read};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -18,7 +19,10 @@ use bollard::container::{Config, LogsOptions};
 use bollard::models::HostConfig;
 use bollard::models::PortBinding;
 use clap::Parser;
+use directories::ProjectDirs;
 use futures_util::stream::StreamExt;
+use reqwest::Client;
+use serde::{Deserialize, Serialize};
 use similar::TextDiff;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
@@ -31,7 +35,7 @@ const OUTPUT_PORT: u16 = 5067;
 const API_PORT: u16 = 9600;
 const INPUT_SOCKET: SocketAddr = SocketAddr::new(LOCALHOST, INPUT_PORT);
 const OUTPUT_SOCKET: SocketAddr = SocketAddr::new(LOCALHOST, OUTPUT_PORT);
-const API_SOCKET: SocketAddr = SocketAddr::new(LOCALHOST, API_PORT);
+const API_URL: &'static str = "https://127.0.0.1:9600/";
 const RULES_DIR: &'static str = "rules";
 const TESTS_DIR: &'static str = "tests";
 const INPUT_FILE: &'static str = "input.json";
@@ -60,6 +64,11 @@ struct TestCase {
 #[derive(Debug)]
 struct Container {
     id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Info {
+    status: String,
 }
 
 fn collect_tests(tests_dir: &Path) -> anyhow::Result<Vec<TestCase>> {
@@ -208,6 +217,28 @@ async fn monitor(docker: &bollard::Docker, container_id: &str) -> anyhow::Result
     Ok(())
 }
 
+async fn connect_with_retries(
+    socket: SocketAddr,
+    retries: usize,
+    delay: Duration,
+) -> anyhow::Result<TcpStream> {
+    let mut curr_retries = 0;
+    loop {
+        match TcpStream::connect(socket).await {
+            Ok(strm) => {
+                return Ok(strm);
+            }
+            Err(_) => {
+                curr_retries += 1;
+                if curr_retries >= retries {
+                    return Err(anyhow!("Failed to connect after {} retries.", retries));
+                }
+                sleep(delay).await;
+            }
+        }
+    }
+}
+
 async fn stream_write<const B: usize>(
     file_path: &Path,
     stream: &mut TcpStream,
@@ -307,46 +338,35 @@ async fn run_test_case(
     Ok(())
 }
 
-async fn connect_with_retries(
-    socket: SocketAddr,
-    retries: usize,
-    delay: Duration,
-) -> anyhow::Result<TcpStream> {
-    let mut curr_retries = 0;
-    loop {
-        match TcpStream::connect(socket).await {
-            Ok(strm) => {
-                return Ok(strm);
-            }
-            Err(_) => {
-                curr_retries += 1;
-                if curr_retries >= retries {
-                    return Err(anyhow!("Failed to connect after {} retries.", retries));
-                }
-                sleep(delay).await;
-            }
-        }
-    }
-}
-
 #[derive(Debug, Parser)]
 #[command(author, version, about, long_about = None)]
 struct Arguments {
-    /// Optional project path (e.g. the path to a directory containing `config` and `tests`
+    /// Optional target path (e.g. the path to a directory containing `config` and `tests`
     /// subdirectories)
-    project_dir: Option<PathBuf>,
+    target: Option<PathBuf>,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let proj_dirs = ProjectDirs::from("net", "nausicaea", "lotus").ok_or(anyhow!(
+        "Unable to determine the project directories based on the qualifier 'net.nausicaea.lotus'"
+    ))?;
+
     let args = Arguments::parse();
 
-    let cwd = if let Some(project_dir) = args.project_dir {
-        project_dir
+    let cwd = if let Some(t) = args.target {
+        t
     } else {
         std::env::current_dir()?
     };
 
+    let target_hash = {
+        let mut hasher = std::collections::hash_map::DefaultHasher::default();
+        cwd.hash(&mut hasher);
+        hasher.finish().to_string()
+    };
+
+    let cache_dir = proj_dirs.cache_dir().join(target_hash);
     let rules_dir = cwd.join(RULES_DIR);
     let tests_dir = cwd.join(TESTS_DIR);
 
@@ -360,20 +380,25 @@ async fn main() -> anyhow::Result<()> {
         return Err(anyhow!("No rules were found"));
     }
 
+    if !cache_dir.is_dir() {
+        std::fs::create_dir_all(&cache_dir)?;
+    }
+
     // Write the Logstash config
-    let config = tempfile::NamedTempFile::new()?;
+    let config_path = cache_dir.join("logstash.yml");
+    let config = File::create(&config_path)?;
     let mut config_buffer = std::io::BufWriter::new(config);
     write!(config_buffer, "{}", CONFIG)?;
-    let config = config_buffer.into_inner()?;
 
     // Write the Logstash pipeline config
-    let pipeline_config = tempfile::NamedTempFile::new()?;
+    let pipeline_config_path = cache_dir.join("pipelines.yml");
+    let pipeline_config = File::create(&pipeline_config_path)?;
     let mut pipeline_config_buffer = std::io::BufWriter::new(pipeline_config);
     write!(pipeline_config_buffer, "{}", PIPELINE_CONFIG)?;
-    let pipeline_config = pipeline_config_buffer.into_inner()?;
 
     // Write the Logstash pipeline
-    let pipeline = tempfile::NamedTempFile::new()?;
+    let pipeline_path = cache_dir.join("logstash.conf");
+    let pipeline = File::create(&pipeline_path)?;
     let mut pipeline_buffer = std::io::BufWriter::new(pipeline);
     write!(pipeline_buffer, "{}", INPUT_RULE)?;
     for rule in rules {
@@ -382,39 +407,13 @@ async fn main() -> anyhow::Result<()> {
         std::io::copy(&mut rule_buffer, &mut pipeline_buffer)?;
     }
     write!(pipeline_buffer, "{}", OUTPUT_RULE)?;
-    let pipeline = pipeline_buffer.into_inner()?;
 
     let docker = bollard::Docker::connect_with_local_defaults()?;
 
-    let container = spawn_logstash(
-        &docker,
-        config.path(),
-        pipeline_config.path(),
-        pipeline.path(),
-    )
-    .await?;
-
-    let max_retries = 10;
-    let retry_delay = Duration::from_secs(5);
-    let mut output_stream = connect_with_retries(OUTPUT_SOCKET, max_retries, retry_delay).await?;
-    let mut input_stream = connect_with_retries(INPUT_SOCKET, max_retries, retry_delay).await?;
-
-    loop {
-        let output_data = stream_read::<BUFFER_SIZE>(&output_stream).await?;
-        if !output_data.is_empty() {
-            println!("{}", output_data);
-        }
-    }
-    //for test_case in &test_cases {
-    //    run_test_case(test_case, &mut input_stream, &mut output_stream).await?;
-    //}
+    let container =
+        spawn_logstash(&docker, &config_path, &pipeline_config_path, &pipeline_path).await?;
 
     docker.stop_container(&container.id, None).await?;
-
-    // Close the files only at the end
-    pipeline.close()?;
-    pipeline_config.close()?;
-    config.close()?;
 
     Ok(())
 }
