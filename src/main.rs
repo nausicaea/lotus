@@ -42,18 +42,32 @@ const INPUT_FILE: &'static str = "input.json";
 const OUTPUT_FILE: &'static str = "output.json";
 const DOCKER_IMAGE: &'static str = "docker.elastic.co/logstash/logstash:8.5.3";
 const RULE_EXTENSION: &'static str = "conf";
-const INPUT_RULE: &'static str =
-    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/logstash/input.conf"));
-const OUTPUT_RULE: &'static str =
-    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/logstash/output.conf"));
-const CONFIG: &'static str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/logstash/logstash.yml"
-));
-const PIPELINE_CONFIG: &'static str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/logstash/pipelines.yml"
-));
+const INPUT_RULE: &'static str = const_format::formatcp!("input {{ http {{ host => '0.0.0.0' port => {INPUT_PORT} response_code => 204 codec => json }} }}");
+const OUTPUT_RULE: &'static str = r#"
+output {
+    stdout {
+        codec => json
+    }
+}
+"#;
+const CONFIG: &'static str = r#"
+---
+http.host: "0.0.0.0"
+# automatic reloading will not work with stdin input
+config.reload.automatic: false
+xpack.monitoring.enabled: false
+log.level: info
+log.format: json
+# having one worker ensures the order of logs stays consistent to prevent concurrency issues
+pipeline.ordered: false
+pipeline.workers: 1
+pipeline.ecs_compatibility: v1
+"#;
+const PIPELINE_CONFIG: &'static str = r#"
+---
+- pipeline.id: main
+  path.config: "/usr/share/logstash/pipeline"
+"#;
 
 #[derive(Debug)]
 struct TestCase {
