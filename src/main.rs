@@ -5,6 +5,7 @@
 //! (first) and `output` (last) rules. Files in `/rules` are sorted lexicographically before
 //! concatenation.
 
+use std::collections::HashMap;
 use std::fs::File;
 use std::hash::{Hash, Hasher};
 use std::io::Write;
@@ -19,7 +20,10 @@ use bollard::container::{Config, LogsOptions};
 use bollard::models::HealthConfig;
 use bollard::models::HealthStatusEnum;
 use bollard::models::HostConfig;
+use bollard::models::Mount;
+use bollard::models::MountTypeEnum;
 use bollard::models::PortBinding;
+use bollard::volume::CreateVolumeOptions;
 use clap::Parser;
 use directories::ProjectDirs;
 use futures_util::stream::StreamExt;
@@ -51,7 +55,7 @@ http.host: "0.0.0.0"
 # automatic reloading will not work with stdin input
 config.reload.automatic: false
 xpack.monitoring.enabled: false
-log.level: debug
+log.level: info
 log.format: json
 # having one worker ensures the order of logs stays consistent to prevent concurrency issues
 pipeline.ordered: false
@@ -181,6 +185,18 @@ async fn spawn_logstash(
     config_path: &Path,
     pipeline_path: &Path,
 ) -> anyhow::Result<Container> {
+    let config_volume = docker
+        .create_volume::<String>(CreateVolumeOptions {
+            name: "logstash-config".to_string(),
+            ..Default::default()
+        })
+        .await?;
+    let pipeline_volume = docker
+        .create_volume::<String>(CreateVolumeOptions {
+            name: "logstash-pipeline".to_string(),
+            ..Default::default()
+        })
+        .await?;
     let response = docker
         .create_container::<String, String>(
             None,
@@ -198,6 +214,10 @@ async fn spawn_logstash(
                         .map(|p| (format!("{}/tcp", p), std::collections::HashMap::default()))
                         .collect(),
                 ),
+                // volumes: Some([
+                //     "/usr/share/logstash/config",
+                //     "/usr/share/logstash/pipeline",
+                // ].into_iter().map(|v| (v.to_string(), HashMap::default())).collect()),
                 host_config: Some(HostConfig {
                     auto_remove: Some(false),
                     port_bindings: Some(
@@ -214,15 +234,21 @@ async fn spawn_logstash(
                             })
                             .collect(),
                     ),
-                    binds: Some(vec![
-                        format!(
-                            "{}:/usr/share/logstash/config/logstash.yml:ro",
-                            config_path.display()
-                        ),
-                        format!(
-                            "{}:/usr/share/logstash/pipeline/logstash.conf:ro",
-                            pipeline_path.display()
-                        ),
+                    mounts: Some(vec![
+                        Mount {
+                            target: Some(String::from("/usr/share/logstash/config/logstash.yml")),
+                            source: Some(config_path.display().to_string()),
+                            read_only: Some(true),
+                            typ: Some(MountTypeEnum::BIND),
+                            ..Default::default()
+                        },
+                        Mount {
+                            target: Some(String::from("/usr/share/logstash/pipeline/logstash.conf")),
+                            source: Some(pipeline_path.display().to_string()),
+                            read_only: Some(true),
+                            typ: Some(MountTypeEnum::BIND),
+                            ..Default::default()
+                        },
                     ]),
                     ..Default::default()
                 }),
