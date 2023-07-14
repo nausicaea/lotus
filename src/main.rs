@@ -16,6 +16,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Context};
 use bollard::container::{Config, LogsOptions};
+use bollard::models::HealthConfig;
 use bollard::models::HostConfig;
 use bollard::models::PortBinding;
 use clap::Parser;
@@ -164,6 +165,10 @@ async fn spawn_logstash(
                 image: Some(DOCKER_IMAGE.to_string()),
                 attach_stdout: Some(true),
                 attach_stderr: Some(true),
+                healthcheck: Some(HealthConfig {
+                    test: Some(["CMD-SHELL", r#"test $(curl -s "http://127.0.0.1:9600" | grep -Po '(?<="status":")\w+(?=")') = "green""#].into_iter().map(|s| s.to_string()).collect()),
+                    ..Default::default()
+                }),
                 exposed_ports: Some(
                     [INPUT_PORT, OUTPUT_PORT, API_PORT]
                         .into_iter()
@@ -427,7 +432,14 @@ async fn main() -> anyhow::Result<()> {
     let container =
         spawn_logstash(&docker, &config_path, &pipeline_config_path, &pipeline_path).await?;
 
-    docker.stop_container(&container.id, None).await?;
+    // let client = Client::new();
+    // let logstash_api_info = client.get("http://127.0.0.1:9600")
+    //     .send()
+    //     .await?
+    //     .json::<Info>()
+    //     .await?;
+
+    // docker.stop_container(&container.id, None).await?;
 
     Ok(())
 }
