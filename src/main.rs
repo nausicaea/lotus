@@ -17,6 +17,7 @@ use std::time::Duration;
 use anyhow::{anyhow, Context};
 use bollard::container::{Config, LogsOptions};
 use bollard::models::HealthConfig;
+use bollard::models::HealthStatusEnum;
 use bollard::models::HostConfig;
 use bollard::models::PortBinding;
 use clap::Parser;
@@ -152,6 +153,40 @@ fn collect_rules(rules_dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
     Ok(rules)
 }
 
+async fn wait_for_healthy(
+    docker: &bollard::Docker,
+    container_id: &str,
+    retries: usize,
+    delay: Duration,
+) -> anyhow::Result<()> {
+    let mut curr_retries = 0;
+    loop {
+        let inspect = docker.inspect_container(container_id, None).await?;
+        let health_status = inspect.state.and_then(|s| s.health).and_then(|h| h.status);
+        match health_status {
+            Some(HealthStatusEnum::HEALTHY) => break,
+            None | Some(HealthStatusEnum::STARTING) => {
+                curr_retries += 1;
+                if curr_retries >= retries {
+                    return Err(anyhow!(
+                        "Failed to determine the Docker container health status after {} retries.",
+                        retries
+                    ));
+                }
+                sleep(delay).await;
+            }
+            Some(hs) => {
+                return Err(anyhow!(
+                    "Unexpected Docker container health status: {:?}",
+                    hs
+                ))
+            }
+        }
+    }
+
+    Ok(())
+}
+
 async fn spawn_logstash(
     docker: &bollard::Docker,
     config_path: &Path,
@@ -213,6 +248,10 @@ async fn spawn_logstash(
         .await?;
 
     docker.start_container::<String>(&response.id, None).await?;
+
+    let retries = 10;
+    let delay = Duration::from_secs(10);
+    wait_for_healthy(docker, &response.id, retries, delay).await?;
 
     Ok(Container { id: response.id })
 }
