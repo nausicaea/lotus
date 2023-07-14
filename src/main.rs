@@ -51,16 +51,13 @@ http.host: "0.0.0.0"
 # automatic reloading will not work with stdin input
 config.reload.automatic: false
 xpack.monitoring.enabled: false
-log.level: info
+log.level: debug
 log.format: json
 # having one worker ensures the order of logs stays consistent to prevent concurrency issues
 pipeline.ordered: false
 pipeline.workers: 1
 pipeline.ecs_compatibility: v1
-"#;
-const PIPELINE_CONFIG: &'static str = r#"---
-- pipeline.id: main
-  path.config: "/usr/share/logstash/pipeline"
+path.config: /usr/share/logstash/pipeline
 "#;
 
 #[derive(Debug)]
@@ -182,7 +179,6 @@ async fn wait_for_healthy(
 async fn spawn_logstash(
     docker: &bollard::Docker,
     config_path: &Path,
-    pipeline_config_path: &Path,
     pipeline_path: &Path,
 ) -> anyhow::Result<Container> {
     let response = docker
@@ -224,10 +220,6 @@ async fn spawn_logstash(
                             config_path.display()
                         ),
                         format!(
-                            "{}:/usr/share/logstash/config/pipelines.yml:ro",
-                            pipeline_config_path.display()
-                        ),
-                        format!(
                             "{}:/usr/share/logstash/pipeline/logstash.conf:ro",
                             pipeline_path.display()
                         ),
@@ -241,9 +233,9 @@ async fn spawn_logstash(
 
     docker.start_container::<String>(&response.id, None).await?;
 
-    let retries = 10;
-    let delay = Duration::from_secs(10);
-    wait_for_healthy(docker, &response.id, retries, delay).await?;
+    // let retries = 10;
+    // let delay = Duration::from_secs(10);
+    // wait_for_healthy(docker, &response.id, retries, delay).await?;
 
     Ok(Container { id: response.id })
 }
@@ -440,12 +432,6 @@ async fn main() -> anyhow::Result<()> {
     let mut config_buffer = std::io::BufWriter::new(config);
     write!(config_buffer, "{}", CONFIG)?;
 
-    // Write the Logstash pipeline config
-    let pipeline_config_path = cache_dir.join("pipelines.yml");
-    let pipeline_config = File::create(&pipeline_config_path)?;
-    let mut pipeline_config_buffer = std::io::BufWriter::new(pipeline_config);
-    write!(pipeline_config_buffer, "{}", PIPELINE_CONFIG)?;
-
     // Write the Logstash pipeline
     let pipeline_path = cache_dir.join("logstash.conf");
     let pipeline = File::create(&pipeline_path)?;
@@ -460,8 +446,7 @@ async fn main() -> anyhow::Result<()> {
 
     let docker = bollard::Docker::connect_with_local_defaults()?;
 
-    let container =
-        spawn_logstash(&docker, &config_path, &pipeline_config_path, &pipeline_path).await?;
+    let container = spawn_logstash(&docker, &config_path, &pipeline_path).await?;
 
     // let client = Client::new();
     // let logstash_api_info = client.get("http://127.0.0.1:9600")
