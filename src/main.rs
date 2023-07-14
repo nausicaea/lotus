@@ -45,15 +45,8 @@ const OUTPUT_FILE: &'static str = "output.json";
 const DOCKER_IMAGE: &'static str = "docker.elastic.co/logstash/logstash:8.5.3";
 const RULE_EXTENSION: &'static str = "conf";
 const INPUT_RULE: &'static str = const_format::formatcp!("input {{ http {{ host => '0.0.0.0' port => {INPUT_PORT} response_code => 204 codec => json }} }}");
-const OUTPUT_RULE: &'static str = r#"
-output {
-    stdout {
-        codec => json
-    }
-}
-"#;
-const CONFIG: &'static str = r#"
----
+const OUTPUT_RULE: &'static str = "output { stdout { codec => json } }";
+const CONFIG: &'static str = r#"---
 http.host: "0.0.0.0"
 # automatic reloading will not work with stdin input
 config.reload.automatic: false
@@ -65,8 +58,7 @@ pipeline.ordered: false
 pipeline.workers: 1
 pipeline.ecs_compatibility: v1
 "#;
-const PIPELINE_CONFIG: &'static str = r#"
----
+const PIPELINE_CONFIG: &'static str = r#"---
 - pipeline.id: main
   path.config: "/usr/share/logstash/pipeline"
 "#;
@@ -458,13 +450,13 @@ async fn main() -> anyhow::Result<()> {
     let pipeline_path = cache_dir.join("logstash.conf");
     let pipeline = File::create(&pipeline_path)?;
     let mut pipeline_buffer = std::io::BufWriter::new(pipeline);
-    write!(pipeline_buffer, "{}", INPUT_RULE)?;
+    writeln!(pipeline_buffer, "{}", INPUT_RULE)?;
     for rule in rules {
         let rule_file = std::fs::File::open(&rule)?;
         let mut rule_buffer = std::io::BufReader::new(rule_file);
         std::io::copy(&mut rule_buffer, &mut pipeline_buffer)?;
     }
-    write!(pipeline_buffer, "{}", OUTPUT_RULE)?;
+    writeln!(pipeline_buffer, "{}", OUTPUT_RULE)?;
 
     let docker = bollard::Docker::connect_with_local_defaults()?;
 
