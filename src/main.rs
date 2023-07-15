@@ -538,6 +538,16 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("Waiting for the Docker container to be healthy")?;
 
+    let client = reqwest::Client::new();
+    let logstash_info = client
+        .get("http://127.0.0.1:9600/")
+        .send()
+        .await?
+        .json::<Info>()
+        .await?;
+
+    println!("{:?}", logstash_info);
+
     docker
         .stop_container(&container.id, None)
         .await
