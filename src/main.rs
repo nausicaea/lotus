@@ -5,29 +5,30 @@
 //! (first) and `output` (last) rules. Files in `/rules` are sorted lexicographically before
 //! concatenation.
 
-use std::fs::File;
-use std::hash::{Hash, Hasher};
-use std::io::Read;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::path::Path;
-use std::path::PathBuf;
-use std::time::Duration;
+use std::{
+    fs::File,
+    hash::{Hash, Hasher},
+    io::Read,
+    net::{IpAddr, Ipv4Addr, SocketAddr},
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 use anyhow::{anyhow, Context};
 use axum::{extract::State, http::StatusCode, Json};
-use bollard::container::{Config, LogsOptions};
-use bollard::image::BuildImageOptions;
-use bollard::models::BuildInfo;
-use bollard::models::HealthStatusEnum;
-use bollard::models::HostConfig;
-use bollard::models::ImageId;
-use bollard::models::PortBinding;
+use bollard::{
+    container::{Config, LogsOptions},
+    image::BuildImageOptions,
+    models::{BuildInfo, HealthStatusEnum, HostConfig, ImageId, PortBinding},
+};
 use clap::Parser;
 use directories::ProjectDirs;
 use futures_util::stream::StreamExt;
 use serde::{Deserialize, Serialize};
-use tokio::sync::mpsc::{channel, Receiver, Sender};
-use tokio::time::sleep;
+use tokio::{
+    sync::mpsc::{channel, Receiver, Sender},
+    time::sleep,
+};
 
 const LOCALHOST: IpAddr = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
 const INPUT_PORT: u16 = 5066;
