@@ -296,25 +296,28 @@ async fn start_container(docker: &bollard::Docker, container: &Container) -> any
         .await
         .context("Starting the Docker container")?;
 
-    // let retries = 10;
-    // let delay = Duration::from_secs(10);
-    // wait_for_healthy(docker, &response.id, retries, delay).await?;
+    let retries = 10;
+    let delay = Duration::from_secs(10);
+    wait_for_healthy(docker, &container, retries, delay).await?;
 
     Ok(())
 }
 
 async fn wait_for_healthy(
     docker: &bollard::Docker,
-    container_id: &str,
+    container: &Container,
     retries: usize,
     delay: Duration,
 ) -> anyhow::Result<()> {
     let mut curr_retries = 0;
     loop {
-        let inspect = docker.inspect_container(container_id, None).await?;
+        let inspect = docker.inspect_container(&container.id, None).await?;
         let health_status = inspect.state.and_then(|s| s.health).and_then(|h| h.status);
         match health_status {
-            Some(HealthStatusEnum::HEALTHY) => break,
+            Some(HealthStatusEnum::HEALTHY) => {
+                println!("The container is up and healthy");
+                break;
+            }
             None | Some(HealthStatusEnum::STARTING) => {
                 curr_retries += 1;
                 if curr_retries >= retries {
@@ -329,7 +332,7 @@ async fn wait_for_healthy(
                 return Err(anyhow!(
                     "Unexpected Docker container health status: {:?}",
                     hs
-                ))
+                ));
             }
         }
     }
