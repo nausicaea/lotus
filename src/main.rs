@@ -146,7 +146,7 @@ fn collect_rules(rules_dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
     Ok(rules)
 }
 
-async fn build_logstash_image(
+async fn build_container_image(
     docker: &bollard::Docker,
     cache_dir: &Path,
     rules: &[PathBuf],
@@ -255,7 +255,7 @@ async fn build_logstash_image(
     image_id.ok_or(anyhow!("No container image ID was found"))
 }
 
-async fn spawn_logstash(docker: &bollard::Docker, image: &Image) -> anyhow::Result<Container> {
+async fn create_container(docker: &bollard::Docker, image: &Image) -> anyhow::Result<Container> {
     let response = docker
         .create_container::<String, String>(
             None,
@@ -285,15 +285,22 @@ async fn spawn_logstash(docker: &bollard::Docker, image: &Image) -> anyhow::Resu
             },
         )
         .await
-        .context("Creating the docker container")?;
+        .context("Creating the Docker container")?;
 
-    // docker.start_container::<String>(&response.id, None).await?;
+    Ok(Container { id: response.id })
+}
+
+async fn start_container(docker: &bollard::Docker, container: &Container) -> anyhow::Result<()> {
+    docker
+        .start_container::<String>(&container.id, None)
+        .await
+        .context("Starting the Docker container")?;
 
     // let retries = 10;
     // let delay = Duration::from_secs(10);
     // wait_for_healthy(docker, &response.id, retries, delay).await?;
 
-    Ok(Container { id: response.id })
+    Ok(())
 }
 
 async fn wait_for_healthy(
@@ -518,9 +525,11 @@ async fn main() -> anyhow::Result<()> {
 
     let docker = bollard::Docker::connect_with_local_defaults()?;
 
-    let image = build_logstash_image(&docker, &cache_dir, &rules).await?;
+    let image = build_container_image(&docker, &cache_dir, &rules).await?;
 
-    let container = spawn_logstash(&docker, &image).await?;
+    let container = create_container(&docker, &image).await?;
+
+    start_container(&docker, &container).await?;
 
     Ok(())
 }
