@@ -220,8 +220,7 @@ async fn build_container_image(
 
     // Build the container image from the tar archive
     let mut archive_buffer = Vec::new();
-    let mut archive = File::open(&archive_path)?;
-    archive.read_to_end(&mut archive_buffer)?;
+    File::open(&archive_path)?.read_to_end(&mut archive_buffer)?;
     let mut builder_stream = docker.build_image(
         BuildImageOptions {
             t: "lotus-logstash:latest",
@@ -330,9 +329,9 @@ async fn healthy(
     Ok(())
 }
 
-async fn monitor(docker: &bollard::Docker, container_id: &str) -> anyhow::Result<()> {
+async fn monitor(docker: &bollard::Docker, container: &Container) -> anyhow::Result<()> {
     let mut log_stream = docker.logs::<String>(
-        container_id,
+        &container.id,
         Some(LogsOptions {
             follow: true,
             stdout: true,
@@ -547,6 +546,19 @@ async fn main() -> anyhow::Result<()> {
         .await?;
 
     println!("{:?}", logstash_info);
+
+    for test_case in &test_cases {
+        let mut input_data: Vec<u8> = Vec::new();
+        File::open(&test_case.input)?.read_to_end(&mut input_data)?;
+
+        client
+            .post("http://127.0.0.1:5066/")
+            .body(reqwest::Body::from(input_data))
+            .send()
+            .await?;
+    }
+
+    monitor(&docker, &container).await?;
 
     docker
         .stop_container(&container.id, None)
