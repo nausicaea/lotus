@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::hash::{Hash, Hasher};
 use std::io::Write;
-use std::io::{self, Read};
+use std::io::{self, Read, Seek};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::Path;
 use std::path::PathBuf;
@@ -17,9 +17,12 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Context};
 use bollard::container::{Config, LogsOptions};
+use bollard::image::BuildImageOptions;
+use bollard::models::BuildInfo;
 use bollard::models::HealthConfig;
 use bollard::models::HealthStatusEnum;
 use bollard::models::HostConfig;
+use bollard::models::ImageId;
 use bollard::models::Mount;
 use bollard::models::MountTypeEnum;
 use bollard::models::PortBinding;
@@ -45,29 +48,26 @@ const API_URL: &'static str = "https://127.0.0.1:9600/";
 const RULES_DIR: &'static str = "rules";
 const TESTS_DIR: &'static str = "tests";
 const INPUT_FILE: &'static str = "input.json";
-const OUTPUT_FILE: &'static str = "output.json";
-const DOCKER_IMAGE: &'static str = "docker.elastic.co/logstash/logstash:8.5.3";
+const EXPECTED_FILE: &'static str = "expected.json";
 const RULE_EXTENSION: &'static str = "conf";
-const INPUT_RULE: &'static str = const_format::formatcp!("input {{ http {{ host => '0.0.0.0' port => {INPUT_PORT} response_code => 204 codec => json }} }}");
-const OUTPUT_RULE: &'static str = "output { stdout { codec => json } }";
-const CONFIG: &'static str = r#"---
-http.host: "0.0.0.0"
-# automatic reloading will not work with stdin input
-config.reload.automatic: false
-xpack.monitoring.enabled: false
-log.level: info
-log.format: json
-# having one worker ensures the order of logs stays consistent to prevent concurrency issues
-pipeline.ordered: false
-pipeline.workers: 1
-pipeline.ecs_compatibility: v1
-path.config: /usr/share/logstash/pipeline
-"#;
+
+#[derive(rust_embed::RustEmbed)]
+#[folder = "logstash/config"]
+struct ConfigAssets;
+
+#[derive(rust_embed::RustEmbed)]
+#[folder = "logstash/pipeline"]
+struct PipelineAssets;
 
 #[derive(Debug)]
 struct TestCase {
     input: PathBuf,
-    output: PathBuf,
+    expected: PathBuf,
+}
+
+#[derive(Debug)]
+struct Image {
+    id: String,
 }
 
 #[derive(Debug)]
@@ -101,17 +101,17 @@ fn collect_tests(tests_dir: &Path) -> anyhow::Result<Vec<TestCase>> {
                 input_file.display()
             ));
         }
-        let output_file = test_case_dir.join(OUTPUT_FILE);
-        if !output_file.is_file() {
+        let expected_file = test_case_dir.join(EXPECTED_FILE);
+        if !expected_file.is_file() {
             return Err(anyhow!(
-                "The output file was not found: {}",
-                output_file.display()
+                "The expected output file was not found: {}",
+                expected_file.display()
             ));
         }
 
         test_cases.push(TestCase {
             input: input_file,
-            output: output_file,
+            expected: expected_file,
         });
     }
 
@@ -146,6 +146,156 @@ fn collect_rules(rules_dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
     Ok(rules)
 }
 
+async fn build_logstash_image(
+    docker: &bollard::Docker,
+    cache_dir: &Path,
+    rules: &[PathBuf],
+) -> anyhow::Result<Image> {
+    let ctx = handlebars::Context::wraps(serde_json::json!({
+        "input_port": INPUT_PORT,
+        "output_port": OUTPUT_PORT,
+    }))
+    .context("Creating the Handlebars variable context")?;
+
+    // Copy the static files over to the cache directory and build the tar archive
+    let archive_path = cache_dir.join("image.tar");
+    let archive =
+        File::create(&archive_path).context("Creating the container image tar archive file")?;
+    let mut ark = tar::Builder::new(archive);
+    ark.mode(tar::HeaderMode::Deterministic);
+    let mut hbs = handlebars::Handlebars::new();
+    hbs.set_dev_mode(true);
+    hbs.set_strict_mode(true);
+    hbs.register_embed_templates::<ConfigAssets>()
+        .context("Loading the Logstash config assets")?;
+    for name in hbs.get_templates().keys() {
+        let pth = cache_dir.join(name);
+        hbs.render_with_context_to_write(
+            name,
+            &ctx,
+            File::create(&pth)
+                .with_context(|| format!("Creating the config file: {}", pth.display()))?,
+        )
+        .with_context(|| format!("Rendering the template: {}", name))?;
+        ark.append_file(
+            name,
+            &mut File::open(&pth)
+                .with_context(|| format!("Opening the config file: {}", pth.display()))?,
+        )
+        .with_context(|| format!("Appending the file to the tar archive: {}", name))?;
+    }
+
+    // Concatenate the pipeline file
+    let pipeline_path = cache_dir.join("logstash.conf");
+    {
+        let mut hbs = handlebars::Handlebars::new();
+        hbs.set_dev_mode(true);
+        hbs.set_strict_mode(true);
+        hbs.register_embed_templates::<PipelineAssets>()
+            .context("Loading the Logstash pipeline assets")?;
+        let mut pipeline = File::create(&pipeline_path)
+            .with_context(|| format!("Creating the pipeline file: {}", pipeline_path.display()))?;
+        hbs.render_with_context_to_write("input.conf", &ctx, &mut pipeline)
+            .context("Rendering the template input.conf to the pipeline file")?;
+        for rule in rules {
+            std::io::copy(
+                &mut File::open(rule)
+                    .with_context(|| format!("Opening the rule file: {}", rule.display()))?,
+                &mut pipeline,
+            )
+            .context("Adding the rule file to the pipeline file")?;
+        }
+        hbs.render_with_context_to_write("output.conf", &ctx, &mut pipeline)
+            .context("Rendering the template output.conf to the pipeline file")?;
+    }
+
+    ark.append_file(
+        "logstash.conf",
+        &mut File::open(&pipeline_path).context("Opening the pipeline file")?,
+    )
+    .context("Adding the pipeline file 'logstash.conf' to the tar archive")?;
+
+    // Close the archive
+    ark.finish().context("Finishing the tar archive")?;
+
+    // Build the container image from the tar archive
+    let mut archive_buffer = Vec::new();
+    let mut archive = File::open(&archive_path)?;
+    archive.read_to_end(&mut archive_buffer)?;
+    let mut builder_stream = docker.build_image(
+        BuildImageOptions {
+            t: "lotus-logstash:latest",
+            ..Default::default()
+        },
+        None,
+        Some(archive_buffer.into()),
+    );
+
+    let mut image_id: Option<Image> = None;
+    while let Some(bi) = builder_stream.next().await {
+        match bi {
+            Ok(BuildInfo {
+                stream: Some(output),
+                ..
+            }) => print!("{}", output),
+            Ok(BuildInfo {
+                aux: Some(ImageId { id }),
+                ..
+            }) => {
+                image_id = id.map(|id| Image { id });
+            }
+            Ok(bi) => println!("Unknown build state: {:?}", bi),
+            Err(bollard::errors::Error::DockerStreamError { error }) => {
+                return Err(anyhow!("{}", error))
+            }
+            Err(e) => return Err(e.into()),
+        }
+    }
+
+    image_id.ok_or(anyhow!("No container image ID was found"))
+}
+
+async fn spawn_logstash(docker: &bollard::Docker, image: &Image) -> anyhow::Result<Container> {
+    let response = docker
+        .create_container::<String, String>(
+            None,
+            Config {
+                image: Some(image.id.clone()),
+                attach_stdout: Some(true),
+                attach_stderr: Some(true),
+                host_config: Some(HostConfig {
+                    auto_remove: Some(true),
+                    port_bindings: Some(
+                        [INPUT_PORT, OUTPUT_PORT, API_PORT]
+                            .into_iter()
+                            .map(|p| {
+                                (
+                                    format!("{}/tcp", p),
+                                    Some(vec![PortBinding {
+                                        host_ip: Some(LOCALHOST.to_string()),
+                                        host_port: Some(format!("{}/tcp", p)),
+                                    }]),
+                                )
+                            })
+                            .collect(),
+                    ),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        )
+        .await
+        .context("Creating the docker container")?;
+
+    // docker.start_container::<String>(&response.id, None).await?;
+
+    // let retries = 10;
+    // let delay = Duration::from_secs(10);
+    // wait_for_healthy(docker, &response.id, retries, delay).await?;
+
+    Ok(Container { id: response.id })
+}
+
 async fn wait_for_healthy(
     docker: &bollard::Docker,
     container_id: &str,
@@ -178,92 +328,6 @@ async fn wait_for_healthy(
     }
 
     Ok(())
-}
-
-async fn spawn_logstash(
-    docker: &bollard::Docker,
-    config_path: &Path,
-    pipeline_path: &Path,
-) -> anyhow::Result<Container> {
-    let config_volume = docker
-        .create_volume::<String>(CreateVolumeOptions {
-            name: "logstash-config".to_string(),
-            ..Default::default()
-        })
-        .await?;
-    let pipeline_volume = docker
-        .create_volume::<String>(CreateVolumeOptions {
-            name: "logstash-pipeline".to_string(),
-            ..Default::default()
-        })
-        .await?;
-    let response = docker
-        .create_container::<String, String>(
-            None,
-            Config {
-                image: Some(DOCKER_IMAGE.to_string()),
-                attach_stdout: Some(true),
-                attach_stderr: Some(true),
-                healthcheck: Some(HealthConfig {
-                    test: Some(["CMD-SHELL", r#"test $(curl -s "http://127.0.0.1:9600" | grep -Po '(?<="status":")\w+(?=")') = "green""#].into_iter().map(|s| s.to_string()).collect()),
-                    ..Default::default()
-                }),
-                exposed_ports: Some(
-                    [INPUT_PORT, OUTPUT_PORT, API_PORT]
-                        .into_iter()
-                        .map(|p| (format!("{}/tcp", p), std::collections::HashMap::default()))
-                        .collect(),
-                ),
-                // volumes: Some([
-                //     "/usr/share/logstash/config",
-                //     "/usr/share/logstash/pipeline",
-                // ].into_iter().map(|v| (v.to_string(), HashMap::default())).collect()),
-                host_config: Some(HostConfig {
-                    auto_remove: Some(false),
-                    port_bindings: Some(
-                        [INPUT_PORT, OUTPUT_PORT, API_PORT]
-                            .into_iter()
-                            .map(|p| {
-                                (
-                                    format!("{}/tcp", p),
-                                    Some(vec![PortBinding {
-                                        host_ip: Some(LOCALHOST.to_string()),
-                                        host_port: Some(format!("{}/tcp", p)),
-                                    }]),
-                                )
-                            })
-                            .collect(),
-                    ),
-                    mounts: Some(vec![
-                        Mount {
-                            target: Some(String::from("/usr/share/logstash/config/logstash.yml")),
-                            source: Some(config_path.display().to_string()),
-                            read_only: Some(true),
-                            typ: Some(MountTypeEnum::BIND),
-                            ..Default::default()
-                        },
-                        Mount {
-                            target: Some(String::from("/usr/share/logstash/pipeline/logstash.conf")),
-                            source: Some(pipeline_path.display().to_string()),
-                            read_only: Some(true),
-                            typ: Some(MountTypeEnum::BIND),
-                            ..Default::default()
-                        },
-                    ]),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            },
-        )
-        .await?;
-
-    docker.start_container::<String>(&response.id, None).await?;
-
-    // let retries = 10;
-    // let delay = Duration::from_secs(10);
-    // wait_for_healthy(docker, &response.id, retries, delay).await?;
-
-    Ok(Container { id: response.id })
 }
 
 async fn monitor(docker: &bollard::Docker, container_id: &str) -> anyhow::Result<()> {
@@ -389,7 +453,7 @@ async fn run_test_case(
     sleep(Duration::from_secs(60)).await;
     let output_data = stream_read::<BUFFER_SIZE>(output_stream).await?;
 
-    let expected_output_data = std::fs::read_to_string(&test_case.output)?;
+    let expected_output_data = std::fs::read_to_string(&test_case.expected)?;
     let diff = TextDiff::from_lines(&expected_output_data, &output_data);
 
     if diff.ratio() >= 1.0 {
@@ -452,36 +516,11 @@ async fn main() -> anyhow::Result<()> {
         std::fs::create_dir_all(&cache_dir)?;
     }
 
-    // Write the Logstash config
-    let config_path = cache_dir.join("logstash.yml");
-    let config = File::create(&config_path)?;
-    let mut config_buffer = std::io::BufWriter::new(config);
-    write!(config_buffer, "{}", CONFIG)?;
-
-    // Write the Logstash pipeline
-    let pipeline_path = cache_dir.join("logstash.conf");
-    let pipeline = File::create(&pipeline_path)?;
-    let mut pipeline_buffer = std::io::BufWriter::new(pipeline);
-    writeln!(pipeline_buffer, "{}", INPUT_RULE)?;
-    for rule in rules {
-        let rule_file = std::fs::File::open(&rule)?;
-        let mut rule_buffer = std::io::BufReader::new(rule_file);
-        std::io::copy(&mut rule_buffer, &mut pipeline_buffer)?;
-    }
-    writeln!(pipeline_buffer, "{}", OUTPUT_RULE)?;
-
     let docker = bollard::Docker::connect_with_local_defaults()?;
 
-    let container = spawn_logstash(&docker, &config_path, &pipeline_path).await?;
+    let image = build_logstash_image(&docker, &cache_dir, &rules).await?;
 
-    // let client = Client::new();
-    // let logstash_api_info = client.get("http://127.0.0.1:9600")
-    //     .send()
-    //     .await?
-    //     .json::<Info>()
-    //     .await?;
-
-    // docker.stop_container(&container.id, None).await?;
+    let container = spawn_logstash(&docker, &image).await?;
 
     Ok(())
 }
