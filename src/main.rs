@@ -298,7 +298,9 @@ async fn start_container(docker: &bollard::Docker, container: &Container) -> any
 
     let retries = 10;
     let delay = Duration::from_secs(10);
-    wait_for_healthy(docker, &container, retries, delay).await?;
+    wait_for_healthy(docker, &container, retries, delay)
+        .await
+        .context("Waiting for the Docker container to be healthy")?;
 
     Ok(())
 }
