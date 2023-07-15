@@ -6,6 +6,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1"
+axum = "0.6"
 bollard = "0.14"
 clap = { version = "4", features = ["derive"] }
 const_format = "0.2"

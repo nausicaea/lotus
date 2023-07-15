@@ -16,6 +16,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context};
+use axum::{extract::State, http::StatusCode, Json};
 use bollard::container::{Config, LogsOptions};
 use bollard::image::BuildImageOptions;
 use bollard::models::BuildInfo;
@@ -35,6 +36,7 @@ use serde::{Deserialize, Serialize};
 use similar::TextDiff;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::time::sleep;
 
 const BUFFER_SIZE: usize = 4096;
@@ -42,14 +44,19 @@ const LOCALHOST: IpAddr = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
 const INPUT_PORT: u16 = 5066;
 const OUTPUT_PORT: u16 = 5067;
 const API_PORT: u16 = 9600;
-const INPUT_SOCKET: SocketAddr = SocketAddr::new(LOCALHOST, INPUT_PORT);
-const OUTPUT_SOCKET: SocketAddr = SocketAddr::new(LOCALHOST, OUTPUT_PORT);
-const API_URL: &'static str = "https://127.0.0.1:9600/";
 const RULES_DIR: &'static str = "rules";
 const TESTS_DIR: &'static str = "tests";
 const INPUT_FILE: &'static str = "input.json";
 const EXPECTED_FILE: &'static str = "expected.json";
 const RULE_EXTENSION: &'static str = "conf";
+
+#[derive(Debug, Parser)]
+#[command(author, version, about, long_about = None)]
+struct Arguments {
+    /// Optional target path (e.g. the path to a directory containing `config` and `tests`
+    /// subdirectories)
+    target: Option<PathBuf>,
+}
 
 #[derive(rust_embed::RustEmbed)]
 #[folder = "logstash/config"]
@@ -74,6 +81,14 @@ struct Image {
 struct Container {
     id: String,
 }
+
+#[derive(Debug, Clone)]
+struct ServerState {
+    sender: Sender<serde_json::Value>,
+}
+
+#[derive(Default, Debug, Serialize, Deserialize)]
+struct Event {}
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Info {
@@ -154,6 +169,7 @@ async fn build_container_image(
     let ctx = handlebars::Context::wraps(serde_json::json!({
         "input_port": INPUT_PORT,
         "output_port": OUTPUT_PORT,
+        "api_port": API_PORT,
     }))
     .context("Creating the Handlebars variable context")?;
 
@@ -265,7 +281,7 @@ async fn create_container(docker: &bollard::Docker, image: &Image) -> anyhow::Re
                 host_config: Some(HostConfig {
                     auto_remove: Some(true),
                     port_bindings: Some(
-                        [INPUT_PORT, OUTPUT_PORT, API_PORT]
+                        [INPUT_PORT, API_PORT]
                             .into_iter()
                             .map(|p| {
                                 (
@@ -329,6 +345,93 @@ async fn healthy(
     Ok(())
 }
 
+async fn root(
+    State(state): State<ServerState>,
+    Json(payload): Json<serde_json::Value>,
+) -> StatusCode {
+    println!("{:?}", payload);
+    //sender.send(Event::default()).await.unwrap();
+    StatusCode::NO_CONTENT
+}
+
+async fn run_server(sender: Sender<serde_json::Value>) -> anyhow::Result<()> {
+    println!("Starting server");
+    let state = ServerState { sender };
+    axum::Server::bind(&SocketAddr::from(([0, 0, 0, 0], OUTPUT_PORT)))
+        .serve(
+            axum::Router::new()
+                .route("/", axum::routing::post(root))
+                .with_state(state)
+                .into_make_service(),
+        )
+        .await?;
+
+    Ok(())
+}
+
+async fn run_tests(
+    mut receiver: Receiver<serde_json::Value>,
+    cache_dir: &Path,
+    rules: Vec<PathBuf>,
+    test_cases: Vec<TestCase>,
+) -> anyhow::Result<()> {
+    println!("Starting test runner");
+
+    let docker =
+        bollard::Docker::connect_with_local_defaults().context("Connecting to the Docker API")?;
+
+    let image = build_container_image(&docker, cache_dir, &rules)
+        .await
+        .context("Building the Docker container image")?;
+
+    let container = create_container(&docker, &image)
+        .await
+        .context("Creating the Docker container")?;
+
+    docker
+        .start_container::<String>(&container.id, None)
+        .await
+        .context("Starting the Docker container")?;
+
+    let retries = 10;
+    let delay = Duration::from_secs(10);
+    healthy(&docker, &container, retries, delay)
+        .await
+        .context("Waiting for the Docker container to be healthy")?;
+
+    let client = reqwest::Client::new();
+    let logstash_info = client
+        .get("http://127.0.0.1:9600/")
+        .send()
+        .await?
+        .json::<Info>()
+        .await?;
+
+    println!("{:?}", logstash_info);
+
+    println!("Running individual test cases");
+
+    for test_case in test_cases {
+        let mut input_data: Vec<u8> = Vec::new();
+        File::open(&test_case.input)?.read_to_end(&mut input_data)?;
+
+        client
+            .post("http://127.0.0.1:5066/")
+            .body(reqwest::Body::from(input_data))
+            .send()
+            .await?;
+    }
+
+    docker
+        .stop_container(&container.id, None)
+        .await
+        .context("Stopping the Docker container")?;
+
+    receiver.close();
+
+    Ok(())
+}
+
 async fn monitor(docker: &bollard::Docker, container: &Container) -> anyhow::Result<()> {
     let mut log_stream = docker.logs::<String>(
         &container.id,
@@ -346,135 +449,6 @@ async fn monitor(docker: &bollard::Docker, container: &Container) -> anyhow::Res
     }
 
     Ok(())
-}
-
-async fn connect_with_retries(
-    socket: SocketAddr,
-    retries: usize,
-    delay: Duration,
-) -> anyhow::Result<TcpStream> {
-    let mut curr_retries = 0;
-    loop {
-        match TcpStream::connect(socket).await {
-            Ok(strm) => {
-                return Ok(strm);
-            }
-            Err(_) => {
-                curr_retries += 1;
-                if curr_retries >= retries {
-                    return Err(anyhow!("Failed to connect after {} retries.", retries));
-                }
-                sleep(delay).await;
-            }
-        }
-    }
-}
-
-async fn stream_write<const B: usize>(
-    file_path: &Path,
-    stream: &mut TcpStream,
-) -> anyhow::Result<()> {
-    // Open the local file for reading
-    let mut file = File::open(file_path)?;
-
-    // Create a buffer to hold the file contents
-    let mut buffer = [0u8; B];
-
-    // Read chunks from the file and write them to the TcpStream
-    loop {
-        let bytes_read = file.read(&mut buffer[..])?;
-        if bytes_read == 0 {
-            // End of file reached
-            break;
-        }
-
-        let mut bytes_written = 0;
-        loop {
-            // Wait for the socket to be writable
-            stream.writable().await?;
-
-            // Try to write data, this may still fail with `WouldBlock`
-            // if the readiness event is a false positive.
-            match stream.try_write(&buffer[bytes_written..bytes_read]) {
-                Ok(n) if n >= bytes_read => break,
-                Ok(n) => {
-                    bytes_written += n;
-                }
-                Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => break,
-                Err(e) => {
-                    return Err(e.into());
-                }
-            }
-        }
-    }
-
-    // Flush any remaining data in the TcpStream
-    stream.flush().await?;
-
-    Ok(())
-}
-
-async fn stream_read<const B: usize>(stream: &TcpStream) -> anyhow::Result<String> {
-    let mut output: Vec<u8> = Vec::new();
-
-    let mut buffer = [0u8; B];
-
-    let mut bytes_read = 0;
-    loop {
-        stream.readable().await?;
-
-        match stream.try_read(&mut buffer[bytes_read..]) {
-            Ok(0) => break,
-            Ok(n) => {
-                output.extend_from_slice(&buffer[..n]);
-                bytes_read += n;
-            }
-            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-                continue;
-            }
-            Err(e) => {
-                return Err(e.into());
-            }
-        }
-    }
-
-    let output = String::from_utf8(output)?;
-
-    Ok(output)
-}
-
-async fn run_test_case(
-    test_case: &TestCase,
-    input_stream: &mut TcpStream,
-    output_stream: &TcpStream,
-) -> anyhow::Result<()> {
-    stream_write::<BUFFER_SIZE>(&test_case.input, input_stream).await?;
-    sleep(Duration::from_secs(60)).await;
-    let output_data = stream_read::<BUFFER_SIZE>(output_stream).await?;
-
-    let expected_output_data = std::fs::read_to_string(&test_case.expected)?;
-    let diff = TextDiff::from_lines(&expected_output_data, &output_data);
-
-    if diff.ratio() >= 1.0 {
-        println!("Success!");
-    } else {
-        eprintln!(
-            "{}",
-            diff.unified_diff()
-                .context_radius(10)
-                .header("expected", "actual")
-        );
-    }
-
-    Ok(())
-}
-
-#[derive(Debug, Parser)]
-#[command(author, version, about, long_about = None)]
-struct Arguments {
-    /// Optional target path (e.g. the path to a directory containing `config` and `tests`
-    /// subdirectories)
-    target: Option<PathBuf>,
 }
 
 #[tokio::main]
@@ -515,55 +489,17 @@ async fn main() -> anyhow::Result<()> {
         std::fs::create_dir_all(&cache_dir).context("Creating the cache directory")?;
     }
 
-    let docker =
-        bollard::Docker::connect_with_local_defaults().context("Connecting to the Docker API")?;
-
-    let image = build_container_image(&docker, &cache_dir, &rules)
-        .await
-        .context("Building the Docker container image")?;
-
-    let container = create_container(&docker, &image)
-        .await
-        .context("Creating the Docker container")?;
-
-    docker
-        .start_container::<String>(&container.id, None)
-        .await
-        .context("Starting the Docker container")?;
-
-    let retries = 10;
-    let delay = Duration::from_secs(10);
-    healthy(&docker, &container, retries, delay)
-        .await
-        .context("Waiting for the Docker container to be healthy")?;
-
-    let client = reqwest::Client::new();
-    let logstash_info = client
-        .get("http://127.0.0.1:9600/")
-        .send()
-        .await?
-        .json::<Info>()
-        .await?;
-
-    println!("{:?}", logstash_info);
-
-    for test_case in &test_cases {
-        let mut input_data: Vec<u8> = Vec::new();
-        File::open(&test_case.input)?.read_to_end(&mut input_data)?;
-
-        client
-            .post("http://127.0.0.1:5066/")
-            .body(reqwest::Body::from(input_data))
-            .send()
-            .await?;
-    }
-
-    monitor(&docker, &container).await?;
-
-    docker
-        .stop_container(&container.id, None)
-        .await
-        .context("Stopping the Docker container")?;
+    let (sender, receiver) = channel(32);
+    let (server, test_runner) = tokio::join!(
+        tokio::spawn(async move { run_server(sender).await.unwrap() }),
+        tokio::spawn(async move {
+            run_tests(receiver, &cache_dir, rules, test_cases)
+                .await
+                .unwrap()
+        }),
+    );
+    server?;
+    test_runner?;
 
     Ok(())
 }
