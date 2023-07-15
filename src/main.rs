@@ -313,7 +313,10 @@ async fn wait_for_healthy(
 ) -> anyhow::Result<()> {
     let mut curr_retries = 0;
     loop {
-        let inspect = docker.inspect_container(&container.id, None).await?;
+        let inspect = docker
+            .inspect_container(&container.id, None)
+            .await
+            .context("Inspecting the Docker container")?;
         let health_status = inspect.state.and_then(|s| s.health).and_then(|h| h.status);
         match health_status {
             Some(HealthStatusEnum::HEALTHY) => {
