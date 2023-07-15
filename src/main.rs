@@ -339,8 +339,12 @@ async fn root(
     State(state): State<ServerState>,
     Json(payload): Json<serde_json::Value>,
 ) -> StatusCode {
-    println!("{:?}", payload);
-    //sender.send(Event::default()).await.unwrap();
+    state
+        .sender
+        .send(payload)
+        .await
+        .context("When sending the request payload to the main task")
+        .unwrap();
     StatusCode::NO_CONTENT
 }
 
@@ -354,7 +358,8 @@ async fn run_server(sender: Sender<serde_json::Value>) -> anyhow::Result<()> {
                 .with_state(state)
                 .into_make_service(),
         )
-        .await?;
+        .await
+        .context("When running the output responder server")?;
 
     Ok(())
 }
@@ -391,7 +396,7 @@ async fn run_tests(
 
     let client = reqwest::Client::new();
     let logstash_info = client
-        .get("http://127.0.0.1:9600/")
+        .get(format!("http://{}:{}/", LOCALHOST, API_PORT))
         .send()
         .await?
         .json::<Info>()
@@ -406,10 +411,13 @@ async fn run_tests(
         File::open(&test_case.input)?.read_to_end(&mut input_data)?;
 
         client
-            .post("http://127.0.0.1:5066/")
+            .post(format!("http://{}:{}/", LOCALHOST, INPUT_PORT))
             .body(reqwest::Body::from(input_data))
             .send()
             .await?;
+
+        let output_data = receiver.recv().await;
+        println!("{:?}", output_data);
     }
 
     docker
