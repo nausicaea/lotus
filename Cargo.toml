@@ -9,9 +9,7 @@ anyhow = "1"
 axum = "0.6"
 bollard = "0.14"
 clap = { version = "4", features = ["derive"] }
-const_format = "0.2"
 directories = "5"
-futures = "0.3"
 futures-util = "0.3"
 handlebars = { version = "4.3", features = ["rust-embed"] }
 reqwest = { version = "0.11", features = ["json"] }

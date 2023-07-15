@@ -5,11 +5,9 @@
 //! (first) and `output` (last) rules. Files in `/rules` are sorted lexicographically before
 //! concatenation.
 
-use std::collections::HashMap;
 use std::fs::File;
 use std::hash::{Hash, Hasher};
-use std::io::Write;
-use std::io::{self, Read, Seek};
+use std::io::Read;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::Path;
 use std::path::PathBuf;
@@ -20,26 +18,17 @@ use axum::{extract::State, http::StatusCode, Json};
 use bollard::container::{Config, LogsOptions};
 use bollard::image::BuildImageOptions;
 use bollard::models::BuildInfo;
-use bollard::models::HealthConfig;
 use bollard::models::HealthStatusEnum;
 use bollard::models::HostConfig;
 use bollard::models::ImageId;
-use bollard::models::Mount;
-use bollard::models::MountTypeEnum;
 use bollard::models::PortBinding;
-use bollard::volume::CreateVolumeOptions;
 use clap::Parser;
 use directories::ProjectDirs;
 use futures_util::stream::StreamExt;
-use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use similar::TextDiff;
-use tokio::io::AsyncWriteExt;
-use tokio::net::TcpStream;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::time::sleep;
 
-const BUFFER_SIZE: usize = 4096;
 const LOCALHOST: IpAddr = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
 const INPUT_PORT: u16 = 5066;
 const OUTPUT_PORT: u16 = 5067;
