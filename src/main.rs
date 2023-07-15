@@ -290,22 +290,7 @@ async fn create_container(docker: &bollard::Docker, image: &Image) -> anyhow::Re
     Ok(Container { id: response.id })
 }
 
-async fn start_container(docker: &bollard::Docker, container: &Container) -> anyhow::Result<()> {
-    docker
-        .start_container::<String>(&container.id, None)
-        .await
-        .context("Starting the Docker container")?;
-
-    let retries = 10;
-    let delay = Duration::from_secs(10);
-    wait_for_healthy(docker, &container, retries, delay)
-        .await
-        .context("Waiting for the Docker container to be healthy")?;
-
-    Ok(())
-}
-
-async fn wait_for_healthy(
+async fn healthy(
     docker: &bollard::Docker,
     container: &Container,
     retries: usize,
@@ -528,16 +513,35 @@ async fn main() -> anyhow::Result<()> {
     }
 
     if !cache_dir.is_dir() {
-        std::fs::create_dir_all(&cache_dir)?;
+        std::fs::create_dir_all(&cache_dir).context("Creating the cache directory")?;
     }
 
-    let docker = bollard::Docker::connect_with_local_defaults()?;
+    let docker =
+        bollard::Docker::connect_with_local_defaults().context("Connecting to the Docker API")?;
 
-    let image = build_container_image(&docker, &cache_dir, &rules).await?;
+    let image = build_container_image(&docker, &cache_dir, &rules)
+        .await
+        .context("Building the Docker container image")?;
 
-    let container = create_container(&docker, &image).await?;
+    let container = create_container(&docker, &image)
+        .await
+        .context("Creating the Docker container")?;
 
-    start_container(&docker, &container).await?;
+    docker
+        .start_container::<String>(&container.id, None)
+        .await
+        .context("Starting the Docker container")?;
+
+    let retries = 10;
+    let delay = Duration::from_secs(10);
+    healthy(&docker, &container, retries, delay)
+        .await
+        .context("Waiting for the Docker container to be healthy")?;
+
+    docker
+        .stop_container(&container.id, None)
+        .await
+        .context("Stopping the Docker container")?;
 
     Ok(())
 }
