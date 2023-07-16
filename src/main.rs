@@ -347,6 +347,7 @@ async fn root(
         .await
         .context("When sending the request payload to the main task")
         .unwrap();
+
     StatusCode::NO_CONTENT
 }
 
@@ -362,6 +363,40 @@ async fn run_server(sender: Sender<serde_json::Value>) -> anyhow::Result<()> {
         )
         .await
         .context("When running the event responder server")?;
+
+    Ok(())
+}
+
+async fn run_test_case(
+    client: &reqwest::Client,
+    receiver: &mut Receiver<serde_json::Value>,
+    test_case: &TestCase,
+) -> anyhow::Result<()> {
+    let input = File::open(&test_case.input).context("When opening the input file")?;
+    let input_data = serde_json::from_reader::<_, serde_json::Value>(input)
+        .context("When deserializing the input file")?;
+
+    client
+        .post(format!("http://{}:{}/", LOCALHOST, INPUT_PORT))
+        .json(&input_data)
+        .send()
+        .await
+        .context("When sending input data to the Logstash container via HTTP")?;
+
+    let output_data = receiver
+        .recv()
+        .await
+        .ok_or(anyhow!("Logstash did not send output event data"))?;
+
+    let expected =
+        File::open(&test_case.expected).context("When opening the expected output file")?;
+    let expected_data = serde_json::from_reader::<_, serde_json::Value>(expected)
+        .context("When deserializing the expected output file")?;
+
+    let config = assert_json_diff::Config::new(assert_json_diff::CompareMode::Strict);
+    if let Err(e) = assert_json_matches_no_panic(&output_data, &expected_data, config) {
+        println!("{}", e);
+    }
 
     Ok(())
 }
@@ -396,44 +431,19 @@ async fn run_tests(
         .await
         .context("Waiting for the Docker container to be healthy")?;
 
-    let client = reqwest::Client::new();
-    let logstash_info = client
-        .get(format!("http://{}:{}/", LOCALHOST, API_PORT))
-        .send()
-        .await?
-        .json::<Info>()
-        .await?;
-
-    println!("{:?}", logstash_info);
-
     println!("Running individual test cases");
+    let client = reqwest::Client::new();
+    for (i, test_case) in test_cases.iter().enumerate() {
+        let test_case_name = test_case
+            .input
+            .parent()
+            .and_then(|p| p.file_name())
+            .and_then(|dn| dn.to_str())
+            .ok_or(anyhow!("Unable to determine the name of test case {}", i))?;
 
-    for test_case in test_cases {
-        let input = File::open(&test_case.input).context("When opening the input file")?;
-        let input_data = serde_json::from_reader::<_, serde_json::Value>(input)
-            .context("When deserializing the input file")?;
-
-        client
-            .post(format!("http://{}:{}/", LOCALHOST, INPUT_PORT))
-            .json(&input_data)
-            .send()
+        run_test_case(&client, &mut receiver, test_case)
             .await
-            .context("When sending input data to the Logstash container via HTTP")?;
-
-        let output_data = receiver
-            .recv()
-            .await
-            .ok_or(anyhow!("Logstash did not send output event data"))?;
-
-        let expected =
-            File::open(&test_case.expected).context("When opening the expected output file")?;
-        let expected_data = serde_json::from_reader::<_, serde_json::Value>(expected)
-            .context("When deserializing the expected output file")?;
-
-        let config = assert_json_diff::Config::new(assert_json_diff::CompareMode::Strict);
-        if let Err(e) = assert_json_matches_no_panic(&output_data, &expected_data, config) {
-            println!("{}", e);
-        }
+            .with_context(|| format!("When running test case {}: {}", i, test_case_name))?;
     }
 
     docker
