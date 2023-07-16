@@ -21,6 +21,7 @@ use lotus::test_cases::run_tests;
 
 const RULES_DIR: &'static str = "rules";
 const TESTS_DIR: &'static str = "tests";
+const FQAN: [&'static str; 3] = ["net", "nausicaea", "lotus"];
 
 #[derive(Debug, Parser)]
 #[command(author, version, about, long_about = None)]
@@ -32,8 +33,9 @@ struct Arguments {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let proj_dirs = ProjectDirs::from("net", "nausicaea", "lotus").ok_or(anyhow!(
-        "Unable to determine the project directories based on the qualifier 'net.nausicaea.lotus'"
+    let proj_dirs = ProjectDirs::from(FQAN[0], FQAN[1], FQAN[3]).ok_or(anyhow!(
+        "Unable to determine the project directories based on the qualifier '{}'",
+        FQAN.join(".")
     ))?;
 
     let args = Arguments::parse();
