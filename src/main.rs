@@ -82,11 +82,6 @@ struct ServerState {
 #[derive(Default, Debug, Serialize, Deserialize)]
 struct Event {}
 
-#[derive(Debug, Serialize, Deserialize)]
-struct Info {
-    status: String,
-}
-
 fn collect_tests(tests_dir: &Path) -> anyhow::Result<Vec<TestCase>> {
     let mut test_cases: Vec<TestCase> = Vec::new();
     let dir_iter = std::fs::read_dir(tests_dir)
