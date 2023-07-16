@@ -116,16 +116,12 @@ pub async fn build_container_image(
     while let Some(bi) = builder_stream.next().await {
         match bi {
             Ok(BuildInfo {
-                stream: Some(output),
-                ..
-            }) => print!("{}", output),
-            Ok(BuildInfo {
                 aux: Some(ImageId { id }),
                 ..
             }) => {
                 image_id = id.map(|id| Image { id });
             }
-            Ok(bi) => println!("Unknown build state: {:?}", bi),
+            Ok(_) => (),
             Err(bollard::errors::Error::DockerStreamError { error }) => {
                 return Err(anyhow!("{}", error))
             }
@@ -189,7 +185,6 @@ pub async fn healthy(
         let health_status = inspect.state.and_then(|s| s.health).and_then(|h| h.status);
         match health_status {
             Some(HealthStatusEnum::HEALTHY) => {
-                println!("The container is up and healthy");
                 break;
             }
             None | Some(HealthStatusEnum::STARTING) => {

@@ -26,7 +26,6 @@ async fn root(
 }
 
 pub async fn run_server(sender: Sender<serde_json::Value>) -> anyhow::Result<()> {
-    println!("Starting the event responder server");
     let state = ServerState { sender };
     axum::Server::bind(&SocketAddr::from(([0, 0, 0, 0], OUTPUT_PORT)))
         .serve(

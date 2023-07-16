@@ -9,14 +9,14 @@ use directories::ProjectDirs;
 use tokio::sync::mpsc::channel;
 
 use self::collectors::{collect_rules, collect_tests};
+use self::runner::run_tests;
 use self::server::run_server;
-use self::test_cases::run_tests;
 
 pub mod assets;
 pub mod collectors;
 pub mod docker;
+pub mod runner;
 pub mod server;
-pub mod test_cases;
 
 const LOCALHOST: IpAddr = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
 const INPUT_PORT: u16 = 5066;
@@ -46,34 +46,33 @@ pub async fn default_runner(target: &Path) -> anyhow::Result<()> {
     let rules_dir = target.join(RULES_DIR);
     let tests_dir = target.join(TESTS_DIR);
 
-    let test_cases = collect_tests(&tests_dir).context("Collecting all test cases")?;
-    if test_cases.is_empty() {
-        return Err(anyhow!("No test cases were found"));
-    }
-
     let rules = collect_rules(&rules_dir).context("Collecting all rules")?;
     if rules.is_empty() {
         return Err(anyhow!("No rules were found"));
     }
 
+    println!("Collected {} Logstash rule files", rules.len());
+
+    let test_cases = collect_tests(&tests_dir).context("Collecting all test cases")?;
+    if test_cases.is_empty() {
+        return Err(anyhow!("No test cases were found"));
+    }
+
+    println!("Collected {} test cases", test_cases.len());
+
     if !cache_dir.is_dir() {
         std::fs::create_dir_all(&cache_dir).context("Creating the cache directory")?;
     }
 
-    let (sender, receiver) = channel(CHANNEL_CAPACITY);
+    let (sender_for_server, receiver_for_test_runner) = channel(CHANNEL_CAPACITY);
     tokio::select!(
         _ = tokio::spawn(async move {
-            run_server(sender)
+            run_server(sender_for_server)
                 .await
                 .context("Running the event responder server")
                 .unwrap()
         }) => {},
-        _ = tokio::spawn(async move {
-            run_tests(receiver, &cache_dir, rules, test_cases)
-                .await
-                .context("Running the test runner")
-                .unwrap()
-        }) => {},
+        e = run_tests(receiver_for_test_runner, cache_dir, rules, test_cases) => { e.unwrap() },
     );
 
     Ok(())

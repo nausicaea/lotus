@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use crate::test_cases::TestCase;
+use crate::runner::TestCase;
 use crate::{EXPECTED_FILE, INPUT_FILE, RULE_EXTENSION};
 use anyhow::{anyhow, Context};
 
