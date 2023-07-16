@@ -14,6 +14,8 @@ use std::{
     time::Duration,
 };
 
+use assert_json_diff::assert_json_matches_no_panic;
+
 use anyhow::{anyhow, Context};
 use axum::{extract::State, http::StatusCode, Json};
 use bollard::{
@@ -407,17 +409,30 @@ async fn run_tests(
     println!("Running individual test cases");
 
     for test_case in test_cases {
-        let mut input_data: Vec<u8> = Vec::new();
-        File::open(&test_case.input)?.read_to_end(&mut input_data)?;
+        let input = File::open(&test_case.input).context("When opening the input file")?;
+        let input_data = serde_json::from_reader::<_, serde_json::Value>(input)
+            .context("When deserializing the input file")?;
 
         client
             .post(format!("http://{}:{}/", LOCALHOST, INPUT_PORT))
-            .body(reqwest::Body::from(input_data))
+            .json(&input_data)
             .send()
             .await?;
 
-        let output_data = receiver.recv().await;
-        println!("{:?}", output_data);
+        let output_data = receiver
+            .recv()
+            .await
+            .ok_or(anyhow!("Logstash did not send output event data"))?;
+
+        let expected =
+            File::open(&test_case.expected).context("When opening the expected output file")?;
+        let expected_data = serde_json::from_reader::<_, serde_json::Value>(expected)
+            .context("When deserializing the expected output file")?;
+
+        let config = assert_json_diff::Config::new(assert_json_diff::CompareMode::Strict);
+        if let Err(e) = assert_json_matches_no_panic(&output_data, &expected_data, config) {
+            println!("{}", e);
+        }
     }
 
     docker
