@@ -4,6 +4,14 @@ description = "Logstash test runner"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "lotus"
+path = "src/lib.rs"
+
+[[bin]]
+name = "lotus"
+path = "src/main.rs"
+
 [dependencies]
 anyhow = "1"
 assert-json-diff = "2"
