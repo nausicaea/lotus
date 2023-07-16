@@ -62,12 +62,12 @@ struct TestCase {
     expected: PathBuf,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Image {
     id: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Container {
     id: String,
 }
@@ -349,7 +349,7 @@ async fn root(
 }
 
 async fn run_server(sender: Sender<serde_json::Value>) -> anyhow::Result<()> {
-    println!("Starting server");
+    println!("Starting the event responder server");
     let state = ServerState { sender };
     axum::Server::bind(&SocketAddr::from(([0, 0, 0, 0], OUTPUT_PORT)))
         .serve(
@@ -359,7 +359,7 @@ async fn run_server(sender: Sender<serde_json::Value>) -> anyhow::Result<()> {
                 .into_make_service(),
         )
         .await
-        .context("When running the output responder server")?;
+        .context("When running the event responder server")?;
 
     Ok(())
 }
@@ -425,8 +425,6 @@ async fn run_tests(
         .await
         .context("Stopping the Docker container")?;
 
-    receiver.close();
-
     Ok(())
 }
 
@@ -488,16 +486,15 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let (sender, receiver) = channel(32);
-    let (server, test_runner) = tokio::join!(
-        tokio::spawn(async move { run_server(sender).await.unwrap() }),
-        tokio::spawn(async move {
+    tokio::select!(
+        _ = tokio::spawn(async move { run_server(sender).await.context("Running the event responder server").unwrap() }) => {},
+        _ = tokio::spawn(async move {
             run_tests(receiver, &cache_dir, rules, test_cases)
                 .await
+                .context("Running the test runner")
                 .unwrap()
-        }),
+        }) => {},
     );
-    server?;
-    test_runner?;
 
     Ok(())
 }
