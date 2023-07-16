@@ -417,7 +417,8 @@ async fn run_tests(
             .post(format!("http://{}:{}/", LOCALHOST, INPUT_PORT))
             .json(&input_data)
             .send()
-            .await?;
+            .await
+            .context("When sending input data to the Logstash container via HTTP")?;
 
         let output_data = receiver
             .recv()
