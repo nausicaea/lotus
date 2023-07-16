@@ -19,7 +19,7 @@ use assert_json_diff::assert_json_matches_no_panic;
 use anyhow::{anyhow, Context};
 use axum::{extract::State, http::StatusCode, Json};
 use bollard::{
-    container::{Config, LogsOptions},
+    container::Config,
     image::BuildImageOptions,
     models::{BuildInfo, HealthStatusEnum, HostConfig, ImageId, PortBinding},
 };
@@ -440,25 +440,6 @@ async fn run_tests(
         .stop_container(&container.id, None)
         .await
         .context("Stopping the Docker container")?;
-
-    Ok(())
-}
-
-async fn monitor(docker: &bollard::Docker, container: &Container) -> anyhow::Result<()> {
-    let mut log_stream = docker.logs::<String>(
-        &container.id,
-        Some(LogsOptions {
-            follow: true,
-            stdout: true,
-            stderr: true,
-            ..Default::default()
-        }),
-    );
-
-    while let Some(msg) = log_stream.next().await {
-        let msg = msg.map(|m| m.to_string())?;
-        println!("{}", msg);
-    }
 
     Ok(())
 }
