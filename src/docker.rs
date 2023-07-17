@@ -102,7 +102,10 @@ pub async fn build_container_image(
 
     // Build the container image from the tar archive
     let mut archive_buffer = Vec::new();
-    File::open(&archive_path)?.read_to_end(&mut archive_buffer)?;
+    File::open(&archive_path)
+        .context("Opening the archive file")?
+        .read_to_end(&mut archive_buffer)
+        .context("Reading the archive file into memory")?;
     let mut builder_stream = docker.build_image(
         BuildImageOptions {
             t: "lotus-logstash:latest",

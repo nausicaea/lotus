@@ -12,15 +12,15 @@ use crate::docker::{build_container_image, create_container, healthy, Container}
 use crate::{INPUT_PORT, LOCALHOST};
 
 #[derive(Debug)]
-struct InnerTestContext {
+pub struct TestContext {
     docker: Docker,
     container: Container,
     http_client: Client,
     receiver: Receiver<Value>,
 }
 
-impl InnerTestContext {
-    async fn new(
+impl TestContext {
+    pub async fn new(
         receiver: Receiver<Value>,
         cache_dir: PathBuf,
         rules: Vec<PathBuf>,
@@ -49,37 +49,17 @@ impl InnerTestContext {
 
         let http_client = reqwest::Client::new();
 
-        Ok(InnerTestContext {
+        Ok(Self {
             docker,
             container,
             http_client,
             receiver,
         })
     }
-}
 
-#[derive(Debug)]
-pub struct TestContext(Option<InnerTestContext>);
-
-impl TestContext {
-    pub async fn new(
-        receiver: Receiver<Value>,
-        cache_dir: PathBuf,
-        rules: Vec<PathBuf>,
-    ) -> anyhow::Result<Self> {
-        Ok(Self(Some(
-            InnerTestContext::new(receiver, cache_dir, rules).await?,
-        )))
-    }
-}
-
-impl Drop for TestContext {
-    fn drop(&mut self) {
-        if let Some(tc) = self.0.take() {
-            tokio::spawn(async move {
-                let _ = tc.docker.stop_container(&tc.container.id, None).await;
-            });
-        }
+    async fn close(self) -> anyhow::Result<()> {
+        self.docker.stop_container(&self.container.id, None).await?;
+        Ok(())
     }
 }
 
@@ -128,28 +108,27 @@ pub async fn run_tests(
     rules: Vec<PathBuf>,
     test_cases: Vec<TestCase>,
 ) -> anyhow::Result<()> {
+    let mut test_result: anyhow::Result<()> = Ok(());
+
     let mut context = TestContext::new(receiver, cache_dir, rules)
         .await
         .context("Bootstrapping the test environment")?;
 
     for (i, test_case) in test_cases.iter().enumerate() {
-        let test_case_name = test_case
-            .input
-            .parent()
-            .and_then(|p| p.file_name())
-            .and_then(|dn| dn.to_str())
-            .ok_or(anyhow!("Unable to determine the name of test case {}", i))?;
-
-        let (http_client, receiver) = context
-            .0
-            .as_mut()
-            .map(|ctx| (&ctx.http_client, &mut ctx.receiver))
-            .unwrap();
-
-        run_single_test(http_client, receiver, test_case)
+        let r = run_single_test(&context.http_client, &mut context.receiver, test_case)
             .await
-            .with_context(|| format!("Running test case {}: {}", i, test_case_name))?;
+            .with_context(|| format!("Running test case {}: {}", i, test_case.input.display()));
+
+        match r {
+            Ok(()) => (),
+            Err(e) => {
+                test_result = Err(e);
+                break;
+            }
+        }
     }
 
-    Ok(())
+    context.close().await?;
+
+    test_result
 }
