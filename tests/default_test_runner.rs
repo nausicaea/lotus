@@ -4,33 +4,10 @@ use std::fs::{create_dir, File};
 use std::io::Write;
 
 #[tokio::test]
-async fn successful_run() -> anyhow::Result<()> {
+async fn empty_json_objects() -> anyhow::Result<()> {
     let input_data = json! {{}};
     let expected_data = json! {{
-        "http": {
-            "method": "POST",
-            "request": {
-                "mime_type": "application/json",
-                "body": {
-                    "bytes": "2",
-                },
-            },
-            "version": "HTTP/1.1",
-        },
         "dummy": "true",
-        "url": {
-            "port": 5066,
-            "path": "/",
-            "domain": "127.0.0.1",
-        },
-        "@timestamp": "2023-07-16T13:35:40.682842093Z",
-        "@version": "1",
-        "event": {
-            "original": "{}",
-        },
-        "host": {
-            "ip": "172.17.0.1",
-        },
     }};
 
     let rules_dir = "rules";
