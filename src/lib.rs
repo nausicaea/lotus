@@ -1,9 +1,6 @@
+use std::hash::{Hash, Hasher};
 use std::net::{IpAddr, Ipv4Addr};
 use std::path::PathBuf;
-use std::{
-    hash::{Hash, Hasher},
-    path::Path,
-};
 
 use anyhow::{anyhow, Context};
 use clap::Parser;
