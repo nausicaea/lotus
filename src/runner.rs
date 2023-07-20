@@ -24,6 +24,7 @@ impl TestContext {
         receiver: Receiver<Value>,
         cache_dir: PathBuf,
         rules: Vec<PathBuf>,
+        delete_container: bool,
     ) -> anyhow::Result<Self> {
         let docker =
             Docker::connect_with_local_defaults().context("Connecting to the Docker API")?;
@@ -32,7 +33,7 @@ impl TestContext {
             .await
             .context("Building the Docker container image")?;
 
-        let container = create_container(&docker, &image)
+        let container = create_container(&docker, &image, delete_container)
             .await
             .context("Creating the Docker container")?;
 
@@ -107,10 +108,11 @@ pub async fn run_tests(
     cache_dir: PathBuf,
     rules: Vec<PathBuf>,
     test_cases: Vec<TestCase>,
+    delete_container: bool,
 ) -> anyhow::Result<()> {
     let mut test_result: anyhow::Result<()> = Ok(());
 
-    let mut context = TestContext::new(receiver, cache_dir, rules)
+    let mut context = TestContext::new(receiver, cache_dir, rules, delete_container)
         .await
         .context("Bootstrapping the test environment")?;
 

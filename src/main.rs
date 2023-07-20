@@ -15,6 +15,9 @@ struct Arguments {
     /// Optional target path (e.g. the path to a directory containing `config` and `tests`
     /// subdirectories)
     pub target: Option<PathBuf>,
+    /// If set, do not delete the Docker container after completion of the test run
+    #[arg(short, long)]
+    pub no_delete_container: bool,
 }
 
 #[tokio::main]
@@ -27,5 +30,5 @@ async fn main() -> anyhow::Result<()> {
         std::env::current_dir()?
     };
 
-    default_runner(&target).await
+    default_runner(&target, !args.no_delete_container).await
 }

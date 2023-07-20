@@ -15,7 +15,10 @@ use futures_util::stream::StreamExt;
 use tokio::time::sleep;
 
 use crate::assets::{ConfigAssets, PipelineAssets};
-use crate::{API_PORT, INPUT_PORT, LOCALHOST, OUTPUT_PORT};
+use crate::{
+    API_PORT, FQAN, IMAGE_ARCHIVE_NAME, INPUT_PORT, INPUT_TEMPLATE_NAME, LOCALHOST, OUTPUT_PORT,
+    OUTPUT_TEMPLATE_NAME, PIPELINE_NAME,
+};
 
 #[derive(Debug, Clone)]
 pub struct Image {
@@ -40,7 +43,7 @@ pub async fn build_container_image(
     .context("Creating the Handlebars variable context")?;
 
     // Copy the static files over to the cache directory and build the tar archive
-    let archive_path = cache_dir.join("image.tar");
+    let archive_path = cache_dir.join(IMAGE_ARCHIVE_NAME);
     let archive =
         File::create(&archive_path).context("Creating the container image tar archive file")?;
     let mut ark = tar::Builder::new(archive);
@@ -68,7 +71,7 @@ pub async fn build_container_image(
     }
 
     // Concatenate the pipeline file
-    let pipeline_path = cache_dir.join("logstash.conf");
+    let pipeline_path = cache_dir.join(PIPELINE_NAME);
     {
         let mut hbs = handlebars::Handlebars::new();
         hbs.set_dev_mode(true);
@@ -77,7 +80,7 @@ pub async fn build_container_image(
             .context("Loading the Logstash pipeline assets")?;
         let mut pipeline = File::create(&pipeline_path)
             .with_context(|| format!("Creating the pipeline file: {}", pipeline_path.display()))?;
-        hbs.render_with_context_to_write("input.conf", &ctx, &mut pipeline)
+        hbs.render_with_context_to_write(INPUT_TEMPLATE_NAME, &ctx, &mut pipeline)
             .context("Rendering the template input.conf to the pipeline file")?;
         for rule in rules {
             std::io::copy(
@@ -87,12 +90,12 @@ pub async fn build_container_image(
             )
             .context("Adding the rule file to the pipeline file")?;
         }
-        hbs.render_with_context_to_write("output.conf", &ctx, &mut pipeline)
+        hbs.render_with_context_to_write(OUTPUT_TEMPLATE_NAME, &ctx, &mut pipeline)
             .context("Rendering the template output.conf to the pipeline file")?;
     }
 
     ark.append_file(
-        "logstash.conf",
+        PIPELINE_NAME,
         &mut File::open(&pipeline_path).context("Opening the pipeline file")?,
     )
     .context("Adding the pipeline file 'logstash.conf' to the tar archive")?;
@@ -106,9 +109,13 @@ pub async fn build_container_image(
         .context("Opening the archive file")?
         .read_to_end(&mut archive_buffer)
         .context("Reading the archive file into memory")?;
-    let mut builder_stream = docker.build_image(
+    let cache_name = cache_dir
+        .file_name()
+        .and_then(|f| f.to_str())
+        .ok_or(anyhow!("Cannot determine the name of the cache directory"))?;
+    let mut builder_stream = docker.build_image::<String>(
         BuildImageOptions {
-            t: "lotus-logstash:latest",
+            t: format!("{}/{}-{}:latest", FQAN[1], FQAN[2], cache_name),
             ..Default::default()
         },
         None,
@@ -162,6 +169,7 @@ pub async fn create_syntax_test_container(
 pub async fn create_container(
     docker: &bollard::Docker,
     image: &Image,
+    delete_container: bool,
 ) -> anyhow::Result<Container> {
     let response = docker
         .create_container::<String, String>(
@@ -171,7 +179,7 @@ pub async fn create_container(
                 attach_stdout: Some(true),
                 attach_stderr: Some(true),
                 host_config: Some(HostConfig {
-                    auto_remove: Some(true),
+                    auto_remove: Some(delete_container),
                     port_bindings: Some(
                         [INPUT_PORT, API_PORT]
                             .into_iter()

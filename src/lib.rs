@@ -29,8 +29,12 @@ const RULES_DIR: &'static str = "rules";
 const TESTS_DIR: &'static str = "tests";
 const FQAN: [&'static str; 3] = ["net", "nausicaea", "lotus"];
 const CHANNEL_CAPACITY: usize = 32;
+const IMAGE_ARCHIVE_NAME: &'static str = "image.tar";
+const PIPELINE_NAME: &'static str = "logstash.conf";
+const INPUT_TEMPLATE_NAME: &'static str = "input.conf";
+const OUTPUT_TEMPLATE_NAME: &'static str = "output.conf";
 
-pub async fn default_runner(target: &Path) -> anyhow::Result<()> {
+pub async fn default_runner(target: &Path, delete_container: bool) -> anyhow::Result<()> {
     let proj_dirs = ProjectDirs::from(FQAN[0], FQAN[1], FQAN[2]).ok_or(anyhow!(
         "Unable to determine the project directories based on the qualifier '{}'",
         FQAN.join(".")
@@ -72,7 +76,7 @@ pub async fn default_runner(target: &Path) -> anyhow::Result<()> {
                 .context("Running the event responder server")
                 .unwrap()
         }) => {},
-        e = run_tests(receiver_for_test_runner, cache_dir, rules, test_cases) => { e.unwrap() },
+        e = run_tests(receiver_for_test_runner, cache_dir, rules, test_cases, delete_container) => { e.unwrap() },
     );
 
     Ok(())
