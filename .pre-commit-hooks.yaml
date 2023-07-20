@@ -3,7 +3,7 @@
   name: Lotus Test Runner
   description: Run Logstash pipeline test cases
   entry: lotus
-  types: ["text"]
+  always_run: true
   pass_filenames: false
   require_serial: true
   language: rust
