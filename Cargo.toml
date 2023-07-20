@@ -1,8 +1,9 @@
 [package]
 name = "lotus"
-description = "Logstash test runner"
+description = "Lotus Logstash Test Runner"
 version = "0.1.0"
 edition = "2021"
+readme = "README.md"
 
 [lib]
 name = "lotus"

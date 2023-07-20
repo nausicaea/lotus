@@ -1,6 +1,6 @@
 ---
 - id: lotus
-  name: Lotus Test Runner
+  name: Lotus Logstash Test Runner
   description: Run Logstash pipeline test cases
   entry: lotus
   always_run: true

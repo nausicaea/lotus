@@ -18,6 +18,10 @@ struct Arguments {
     /// If set, do not delete the Docker container after completion of the test run
     #[arg(short, long)]
     pub no_delete_container: bool,
+    #[arg(short, long, default_value_t = String::from("rules"))]
+    pub rules_dir: String,
+    #[arg(short, long, default_value_t = String::from("tests"))]
+    pub tests_dir: String,
 }
 
 #[tokio::main]
