@@ -39,7 +39,7 @@ async fn empty_json_objects() -> anyhow::Result<()> {
     }
 
     // Call the test runner
-    default_runner(tmp_dir.path()).await?;
+    default_runner(tmp_dir.path(), true).await?;
 
     Ok(())
 }
