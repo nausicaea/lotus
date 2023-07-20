@@ -135,6 +135,30 @@ pub async fn build_container_image(
     image_id.ok_or(anyhow!("No container image ID was found"))
 }
 
+pub async fn create_syntax_test_container(
+    docker: &bollard::Docker,
+    image: &Image,
+) -> anyhow::Result<Container> {
+    let response = docker
+        .create_container::<String, String>(
+            None,
+            Config {
+                image: Some(image.id.clone()),
+                attach_stdout: Some(true),
+                attach_stderr: Some(true),
+                host_config: Some(HostConfig {
+                    auto_remove: Some(true),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        )
+        .await
+        .context("Creating the Docker container")?;
+
+    Ok(Container { id: response.id })
+}
+
 pub async fn create_container(
     docker: &bollard::Docker,
     image: &Image,
@@ -179,18 +203,22 @@ pub async fn healthy(
     retries: usize,
     delay: Duration,
 ) -> anyhow::Result<()> {
+    use HealthStatusEnum::*;
+
     let mut curr_retries = 0;
-    loop {
+    'retry: loop {
         let inspect = docker
             .inspect_container(&container.id, None)
             .await
             .context("Inspecting the Docker container")?;
-        let health_status = inspect.state.and_then(|s| s.health).and_then(|h| h.status);
-        match health_status {
-            Some(HealthStatusEnum::HEALTHY) => {
-                break;
-            }
-            None | Some(HealthStatusEnum::STARTING) => {
+
+        let health = inspect
+            .state
+            .and_then(|s| s.health)
+            .and_then(|h| h.status.map(|hs| (h, hs)));
+        match health {
+            Some((_, HEALTHY)) => break 'retry,
+            Some((_, STARTING)) => {
                 curr_retries += 1;
                 if curr_retries >= retries {
                     return Err(anyhow!(
@@ -200,11 +228,15 @@ pub async fn healthy(
                 }
                 sleep(delay).await;
             }
-            Some(hs) => {
+            Some((h, hs)) => {
                 return Err(anyhow!(
-                    "Unexpected Docker container health status: {:?}",
-                    hs
+                    "Unexpected Docker container health status '{}': {:?}",
+                    hs,
+                    h,
                 ));
+            }
+            None => {
+                return Err(anyhow!("No Docker container health status was found"));
             }
         }
     }
