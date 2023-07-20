@@ -6,33 +6,11 @@
 //! concatenation.
 
 use clap::Parser;
-use lotus::default_runner;
-use std::path::PathBuf;
 
-#[derive(Debug, Parser)]
-#[command(author, version, about, long_about = None)]
-struct Arguments {
-    /// Optional target path (e.g. the path to a directory containing `config` and `tests`
-    /// subdirectories)
-    pub target: Option<PathBuf>,
-    /// If set, do not delete the Docker container after completion of the test run
-    #[arg(short, long)]
-    pub no_delete_container: bool,
-    #[arg(short, long, default_value_t = String::from("rules"))]
-    pub rules_dir: String,
-    #[arg(short, long, default_value_t = String::from("tests"))]
-    pub tests_dir: String,
-}
+use lotus::{default_runner, DefaultArguments};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let args = Arguments::parse();
-
-    let target = if let Some(t) = args.target {
-        t
-    } else {
-        std::env::current_dir()?
-    };
-
-    default_runner(&target, !args.no_delete_container).await
+    let args = DefaultArguments::parse();
+    default_runner(&args).await
 }

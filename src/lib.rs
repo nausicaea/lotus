@@ -1,10 +1,12 @@
 use std::net::{IpAddr, Ipv4Addr};
+use std::path::PathBuf;
 use std::{
     hash::{Hash, Hasher},
     path::Path,
 };
 
 use anyhow::{anyhow, Context};
+use clap::Parser;
 use directories::ProjectDirs;
 use tokio::sync::mpsc::channel;
 
@@ -34,11 +36,54 @@ const PIPELINE_NAME: &'static str = "logstash.conf";
 const INPUT_TEMPLATE_NAME: &'static str = "input.conf";
 const OUTPUT_TEMPLATE_NAME: &'static str = "output.conf";
 
-pub async fn default_runner(target: &Path, delete_container: bool) -> anyhow::Result<()> {
+#[derive(Debug, Parser)]
+#[command(author, version, about, long_about = None)]
+pub struct DefaultArguments {
+    /// Optional target path (e.g. the path to a directory containing `config` and `tests`
+    /// subdirectories)
+    pub target: Option<PathBuf>,
+    /// If set, do not delete the Docker container after completion of the test run
+    #[arg(short, long)]
+    pub no_delete_container: bool,
+    /// Optionally change the location of the Logstash rules
+    #[arg(short, long, default_value_t = String::from(RULES_DIR), env = "LOTUS_RULES_DIR")]
+    pub rules_dir: String,
+    /// Optionally change the location of the test cases
+    #[arg(short, long, default_value_t = String::from(TESTS_DIR), env = "LOTUS_TESTS_DIR")]
+    pub tests_dir: String,
+}
+
+impl DefaultArguments {
+    fn target(&self) -> Result<PathBuf, anyhow::Error> {
+        let Some(ref target) = self.target else {
+            let cwd = std::env::current_dir()?;
+            return Ok(cwd);
+        };
+
+        Ok(target.to_path_buf())
+    }
+}
+
+impl Default for DefaultArguments {
+    fn default() -> Self {
+        Self {
+            target: None,
+            no_delete_container: false,
+            rules_dir: String::from(RULES_DIR),
+            tests_dir: String::from(TESTS_DIR),
+        }
+    }
+}
+
+pub async fn default_runner(args: &DefaultArguments) -> anyhow::Result<()> {
     let proj_dirs = ProjectDirs::from(FQAN[0], FQAN[1], FQAN[2]).ok_or(anyhow!(
         "Unable to determine the project directories based on the qualifier '{}'",
         FQAN.join(".")
     ))?;
+
+    let target = args
+        .target()
+        .context("Determining the target location i.e., your project location")?;
 
     let target_hash = {
         let mut hasher = std::collections::hash_map::DefaultHasher::default();
@@ -47,8 +92,8 @@ pub async fn default_runner(target: &Path, delete_container: bool) -> anyhow::Re
     };
 
     let cache_dir = proj_dirs.cache_dir().join(target_hash);
-    let rules_dir = target.join(RULES_DIR);
-    let tests_dir = target.join(TESTS_DIR);
+    let rules_dir = target.join(&args.rules_dir);
+    let tests_dir = target.join(&args.tests_dir);
 
     let rules = collect_rules(&rules_dir).context("Collecting all rules")?;
     if rules.is_empty() {
@@ -76,7 +121,7 @@ pub async fn default_runner(target: &Path, delete_container: bool) -> anyhow::Re
                 .context("Running the event responder server")
                 .unwrap()
         }) => {},
-        e = run_tests(receiver_for_test_runner, cache_dir, rules, test_cases, delete_container) => { e.unwrap() },
+        e = run_tests(receiver_for_test_runner, cache_dir, rules, test_cases, !args.no_delete_container) => { e.unwrap() },
     );
 
     Ok(())

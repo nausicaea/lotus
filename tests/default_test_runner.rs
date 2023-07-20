@@ -1,4 +1,4 @@
-use lotus::default_runner;
+use lotus::{default_runner, DefaultArguments};
 use serde_json::{json, to_writer};
 use std::fs::{create_dir, File};
 use std::io::Write;
@@ -39,7 +39,12 @@ async fn empty_json_objects() -> anyhow::Result<()> {
     }
 
     // Call the test runner
-    default_runner(tmp_dir.path(), true).await?;
+    let args = DefaultArguments {
+        target: Some(tmp_dir.path().to_path_buf()),
+        no_delete_container: true,
+        ..Default::default()
+    };
+    default_runner(&args).await?;
 
     Ok(())
 }
