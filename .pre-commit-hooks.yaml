@@ -1,0 +1,10 @@
+---
+- id: lotus
+  name: Lotus Test Runner
+  description: Run Logstash pipeline test cases
+  entry: lotus
+  types: ["text"]
+  pass_filenames: false
+  require_serial: true
+  language: rust
+  stages: ["pre-push"]
