@@ -3,7 +3,7 @@ http.host: "0.0.0.0"
 # automatic reloading will not work with stdin input
 config.reload.automatic: false
 xpack.monitoring.enabled: false
-log.level: info
+log.level: warn
 log.format: json
 # having one worker ensures the order of logs stays consistent to prevent concurrency issues
 pipeline.ordered: false
