@@ -95,7 +95,7 @@ pub async fn run_single_test(
     let expected_data =
         from_reader::<_, Value>(expected).context("Deserializing the expected output file")?;
 
-    let config = assert_json_diff::Config::new(assert_json_diff::CompareMode::Inclusive);
+    let config = assert_json_diff::Config::new(assert_json_diff::CompareMode::Strict);
     assert_json_matches_no_panic(&output_data, &expected_data, config)
         .map_err(|e| anyhow!("{}", e))
         .context("Comparing the Logstash output (lhs) with the expected output (rhs)")?;
