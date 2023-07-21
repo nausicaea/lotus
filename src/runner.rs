@@ -98,11 +98,20 @@ pub async fn run_single_test(
     let config = assert_json_diff::Config::new(assert_json_diff::CompareMode::Strict);
     assert_json_matches_no_panic(&output_data, &expected_data, config)
         .map_err(|e| {
+            let output_json = match serde_json::to_string_pretty(&output_data) {
+                Ok(oj) => oj,
+                Err(e) => return Into::<anyhow::Error>::into(e),
+            };
+            let expected_json = match serde_json::to_string_pretty(&expected_data) {
+                Ok(ej) => ej,
+                Err(e) => return Into::<anyhow::Error>::into(e),
+            };
+
             anyhow!(
-                "{}\n\nactual:\n{:?}\n\nexpected:\n{:?}",
+                "{}\n\nactual:\n{}\n\nexpected:\n{}",
                 e,
-                &output_data,
-                &expected_data
+                &output_json,
+                &expected_json
             )
         })
         .context("Comparing the actual Logstash output (lhs) with the expected output (rhs)")?;
