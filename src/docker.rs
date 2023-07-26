@@ -142,30 +142,6 @@ pub async fn build_container_image(
     image_id.ok_or(anyhow!("No container image ID was found"))
 }
 
-pub async fn create_syntax_test_container(
-    docker: &bollard::Docker,
-    image: &Image,
-) -> anyhow::Result<Container> {
-    let response = docker
-        .create_container::<String, String>(
-            None,
-            Config {
-                image: Some(image.id.clone()),
-                attach_stdout: Some(true),
-                attach_stderr: Some(true),
-                host_config: Some(HostConfig {
-                    auto_remove: Some(true),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            },
-        )
-        .await
-        .context("Creating the Docker container")?;
-
-    Ok(Container { id: response.id })
-}
-
 pub async fn create_container(
     docker: &bollard::Docker,
     image: &Image,
