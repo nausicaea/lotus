@@ -30,7 +30,13 @@ commit.
 
 ### Prerequisites
 
-First, install Pre-Commit on your system. See [Pre-Commit
+First, you must install Docker on your system. Since Docker comes in many
+different flavours, you should probably follow the [Getting
+Started](https://www.docker.com/get-started/) guide. Lotus might work with
+Podman as well, but that hasn't been tested. **Note that Lotus relies on the
+availability of the Docker API on the host machine.**
+
+As a second requirement, install Pre-Commit on your system. See [Pre-Commit
 Installation](https://pre-commit.com/#install) for details.
 
 Then, create a Pre-Commit configuration within your Logstash pipeline
