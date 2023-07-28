@@ -107,7 +107,8 @@ pub async fn default_runner(args: &DefaultArguments) -> anyhow::Result<()> {
     println!("Collected {} test cases", test_cases.len());
 
     if !cache_dir.is_dir() {
-        std::fs::create_dir_all(&cache_dir).context("Creating the cache directory")?;
+        std::fs::create_dir_all(&cache_dir)
+            .with_context(|| format!("Creating the cache directory: {}", cache_dir.display()))?;
     }
 
     let (sender_for_server, receiver_for_test_runner) = channel(CHANNEL_CAPACITY);

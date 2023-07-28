@@ -113,9 +113,10 @@ pub async fn build_container_image(
         .file_name()
         .and_then(|f| f.to_str())
         .ok_or(anyhow!("Cannot determine the name of the cache directory"))?;
+    let image_tag = format!("{}/{}-{}:latest", FQAN[1], FQAN[2], cache_name);
     let mut builder_stream = docker.build_image::<String>(
         BuildImageOptions {
-            t: format!("{}/{}-{}:latest", FQAN[1], FQAN[2], cache_name),
+            t: image_tag.clone(),
             ..Default::default()
         },
         None,
@@ -133,9 +134,13 @@ pub async fn build_container_image(
             }
             Ok(_) => (),
             Err(bollard::errors::Error::DockerStreamError { error }) => {
-                return Err(anyhow!("{}", error))
+                return Err(anyhow!(
+                    "Docker stream error when building image {}: {}",
+                    &image_tag,
+                    error
+                ))
             }
-            Err(e) => return Err(e.into()),
+            Err(e) => return Err(anyhow!("Other error building image {}: {}", &image_tag, e)),
         }
     }
 
