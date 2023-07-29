@@ -6,10 +6,10 @@ COPY logstash ./logstash/
 COPY src ./src/
 RUN cargo build --release
 
-FROM scratch
-
+FROM docker.io/library/debian:bookworm-slim
 COPY --from=build /volume/target/x86_64-unknown-linux-musl/release/lotus /bin/lotus
-VOLUME ["/volume", "/var/run/docker.sock", "/.cache/lotus"]
+VOLUME ["/volume", "/docker.sock", "/.cache"]
 WORKDIR /volume
 ENV RUST_BACKTRACE=1
+ENV DOCKER_HOST="unix://docker.sock"
 ENTRYPOINT ["/bin/lotus"]

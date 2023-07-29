@@ -27,7 +27,7 @@ impl TestContext {
         delete_container: bool,
     ) -> anyhow::Result<Self> {
         let docker =
-            Docker::connect_with_unix_defaults().context("Connecting to the Docker API")?;
+            Docker::connect_with_local_defaults().context("Connecting to the Docker API")?;
 
         let image = build_container_image(&docker, &cache_dir, &rules)
             .await
