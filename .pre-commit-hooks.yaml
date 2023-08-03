@@ -7,4 +7,4 @@
   pass_filenames: false
   require_serial: true
   language: rust
-  stages: ["pre-push"]
+  stages: ["pre-commit"]
