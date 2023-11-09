@@ -4,7 +4,7 @@ http.host: "0.0.0.0"
 config.reload.automatic: false
 xpack.monitoring.enabled: false
 log.level: info
-log.format: json
+log.format: plain
 # having one worker ensures the order of logs stays consistent to prevent concurrency issues
 pipeline.ordered: false
 pipeline.workers: 1
