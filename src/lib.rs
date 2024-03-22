@@ -21,17 +21,17 @@ const LOCALHOST: IpAddr = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
 const INPUT_PORT: u16 = 5066;
 const OUTPUT_PORT: u16 = 5067;
 const API_PORT: u16 = 9600;
-const INPUT_FILE: &'static str = "input.json";
-const EXPECTED_FILE: &'static str = "expected.json";
-const RULE_EXTENSION: &'static str = "conf";
-const RULES_DIR: &'static str = "rules";
-const TESTS_DIR: &'static str = "tests";
-const FQAN: [&'static str; 3] = ["net", "nausicaea", "lotus"];
+const INPUT_FILE: &str = "input.json";
+const EXPECTED_FILE: &str = "expected.json";
+const RULE_EXTENSION: &str = "conf";
+const RULES_DIR: &str = "rules";
+const TESTS_DIR: &str = "tests";
+const FQAN: [&str; 3] = ["net", "nausicaea", "lotus"];
 const CHANNEL_CAPACITY: usize = 32;
-const IMAGE_ARCHIVE_NAME: &'static str = "image.tar";
-const PIPELINE_NAME: &'static str = "logstash.conf";
-const INPUT_TEMPLATE_NAME: &'static str = "input.conf";
-const OUTPUT_TEMPLATE_NAME: &'static str = "output.conf";
+const IMAGE_ARCHIVE_NAME: &str = "image.tar";
+const PIPELINE_NAME: &str = "logstash.conf";
+const INPUT_TEMPLATE_NAME: &str = "input.conf";
+const OUTPUT_TEMPLATE_NAME: &str = "output.conf";
 
 #[derive(Debug, Parser)]
 #[command(author, version, about, long_about = None)]
