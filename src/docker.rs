@@ -13,6 +13,7 @@ use bollard::{
 };
 use futures_util::stream::StreamExt;
 use tokio::time::sleep;
+use tracing::instrument;
 
 use crate::assets::{ConfigAssets, PipelineAssets};
 use crate::{
@@ -30,6 +31,7 @@ pub struct Container {
     pub(crate) id: String,
 }
 
+#[instrument]
 pub async fn build_container_image(
     docker: &bollard::Docker,
     cache_dir: &Path,
@@ -140,13 +142,20 @@ pub async fn build_container_image(
                     error
                 ))
             }
-            Err(e) => return Err(anyhow!("Other error building image {}: {}", &image_tag, e)),
+            Err(e) => {
+                return Err(anyhow!(
+                    "Unspecified error building image {}: {}",
+                    &image_tag,
+                    e
+                ))
+            }
         }
     }
 
     image_id.ok_or(anyhow!("No container image ID was found"))
 }
 
+#[instrument]
 pub async fn create_container(
     docker: &bollard::Docker,
     image: &Image,
@@ -186,6 +195,7 @@ pub async fn create_container(
     Ok(Container { id: response.id })
 }
 
+#[instrument]
 pub async fn healthy(
     docker: &bollard::Docker,
     container: &Container,

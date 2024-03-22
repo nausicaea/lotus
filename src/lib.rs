@@ -6,6 +6,7 @@ use anyhow::{anyhow, Context};
 use clap::Parser;
 use directories::ProjectDirs;
 use tokio::sync::mpsc::channel;
+use tracing::{debug, info, instrument};
 
 use self::collectors::{collect_rules, collect_tests};
 use self::runner::run_tests;
@@ -51,6 +52,7 @@ pub struct DefaultArguments {
 }
 
 impl DefaultArguments {
+    #[instrument]
     fn target(&self) -> Result<PathBuf, anyhow::Error> {
         let Some(ref target) = self.target else {
             let cwd = std::env::current_dir()?;
@@ -62,6 +64,7 @@ impl DefaultArguments {
 }
 
 impl Default for DefaultArguments {
+    #[instrument]
     fn default() -> Self {
         Self {
             target: None,
@@ -72,46 +75,59 @@ impl Default for DefaultArguments {
     }
 }
 
+#[instrument]
 pub async fn default_runner(args: &DefaultArguments) -> anyhow::Result<()> {
+    debug!("Determine the project data and cache directories");
     let proj_dirs = ProjectDirs::from(FQAN[0], FQAN[1], FQAN[2]).ok_or(anyhow!(
         "Unable to determine the project directories based on the qualifier '{}'",
         FQAN.join(".")
     ))?;
 
+    debug!("Retrieve the test target directory (i.e. project directory)");
     let target = args
         .target()
         .context("Determining the target location i.e., your project location")?;
 
+    debug!("Calculate a HashMap-based hash value for the target location");
     let target_hash = {
         let mut hasher = std::collections::hash_map::DefaultHasher::default();
         target.hash(&mut hasher);
         hasher.finish().to_string()
     };
 
+    debug!("Determine the cache, Logstash rules, and tests directories");
     let cache_dir = proj_dirs.cache_dir().join(target_hash);
     let rules_dir = target.join(&args.rules_dir);
     let tests_dir = target.join(&args.tests_dir);
 
+    debug!("Collect all Logstash rules");
     let rules = collect_rules(&rules_dir).context("Collecting all rules")?;
     if rules.is_empty() {
         return Err(anyhow!("No rules were found"));
     }
 
-    println!("Collected {} Logstash rule files", rules.len());
+    info!("Collected {} Logstash rule files", rules.len());
 
+    debug!("Collect all test cases");
     let test_cases = collect_tests(&tests_dir).context("Collecting all test cases")?;
     if test_cases.is_empty() {
         return Err(anyhow!("No test cases were found"));
     }
 
-    println!("Collected {} test cases", test_cases.len());
+    info!("Collected {} test cases", test_cases.len());
 
     if !cache_dir.is_dir() {
+        debug!("Create a cache directory");
         std::fs::create_dir_all(&cache_dir)
             .with_context(|| format!("Creating the cache directory: {}", cache_dir.display()))?;
     }
 
+    debug!(
+        "Create a communication channel between the test executor and the test response handler"
+    );
     let (sender_for_server, receiver_for_test_runner) = channel(CHANNEL_CAPACITY);
+
+    debug!("Launch both the test executor and the test response handler");
     tokio::select!(
         _ = tokio::spawn(async move {
             run_server(sender_for_server)
@@ -119,7 +135,9 @@ pub async fn default_runner(args: &DefaultArguments) -> anyhow::Result<()> {
                 .context("Running the event responder server")
                 .unwrap()
         }) => {},
-        e = run_tests(receiver_for_test_runner, cache_dir, rules, test_cases, !args.no_delete_container) => { e.unwrap() },
+        e = run_tests(receiver_for_test_runner, cache_dir, rules, test_cases, !args.no_delete_container) => {
+            e.expect("Error running Logstash tests");
+        },
     );
 
     Ok(())

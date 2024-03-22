@@ -3,7 +3,9 @@ use std::path::{Path, PathBuf};
 use crate::runner::TestCase;
 use crate::{EXPECTED_FILE, INPUT_FILE, RULE_EXTENSION};
 use anyhow::{anyhow, Context};
+use tracing::instrument;
 
+#[instrument]
 pub fn collect_tests(tests_dir: &Path) -> anyhow::Result<Vec<TestCase>> {
     let mut test_cases: Vec<TestCase> = Vec::new();
     let dir_iter = std::fs::read_dir(tests_dir)
@@ -42,6 +44,7 @@ pub fn collect_tests(tests_dir: &Path) -> anyhow::Result<Vec<TestCase>> {
     Ok(test_cases)
 }
 
+#[instrument]
 pub fn collect_rules(rules_dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
     let mut rules: Vec<PathBuf> = Vec::new();
     let dir_iter = std::fs::read_dir(rules_dir)

@@ -3,7 +3,7 @@ use serde_json::{json, to_writer};
 use std::fs::{create_dir, File};
 use std::io::Write;
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn empty_json_objects() -> anyhow::Result<()> {
     let input_data = json! {{}};
     let expected_data = json! {{
