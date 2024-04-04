@@ -8,6 +8,8 @@ use directories::ProjectDirs;
 use tokio::sync::mpsc::channel;
 use tracing::{debug, info, instrument};
 
+use crate::collectors::{collect_patterns, collect_scripts};
+
 use self::collectors::{collect_rules, collect_tests};
 use self::runner::run_tests;
 use self::server::run_server;
@@ -25,8 +27,11 @@ const API_PORT: u16 = 9600;
 const INPUT_FILE: &str = "input.json";
 const EXPECTED_FILE: &str = "expected.json";
 const RULE_EXTENSION: &str = "conf";
+const SCRIPT_EXTENSION: &str = "rb";
 const RULES_DIR: &str = "rules";
 const TESTS_DIR: &str = "tests";
+const SCRIPTS_DIR: &str = "scripts";
+const PATTERNS_DIR: &str = "patterns";
 const FQAN: [&str; 3] = ["net", "nausicaea", "lotus"];
 const CHANNEL_CAPACITY: usize = 32;
 const IMAGE_ARCHIVE_NAME: &str = "image.tar";
@@ -49,6 +54,12 @@ pub struct DefaultArguments {
     /// Optionally change the location of the test cases
     #[arg(short, long, default_value_t = String::from(TESTS_DIR), env = "LOTUS_TESTS_DIR")]
     pub tests_dir: String,
+    /// Optionally change the location of the ruby scripts associated with the pipeline
+    #[arg(short, long, default_value_t = String::from(SCRIPTS_DIR), env = "LOTUS_SCRIPTS_DIR")]
+    pub scripts_dir: String,
+    /// Optionally change the location of the grok patterns associated with the pipeline
+    #[arg(short, long, default_value_t = String::from(PATTERNS_DIR), env = "LOTUS_PATTERNS_DIR")]
+    pub patterns_dir: String,
 }
 
 impl DefaultArguments {
@@ -71,6 +82,8 @@ impl Default for DefaultArguments {
             no_delete_container: false,
             rules_dir: String::from(RULES_DIR),
             tests_dir: String::from(TESTS_DIR),
+            scripts_dir: String::from(SCRIPTS_DIR),
+            patterns_dir: String::from(PATTERNS_DIR),
         }
     }
 }
@@ -99,6 +112,8 @@ pub async fn default_runner(args: &DefaultArguments) -> anyhow::Result<()> {
     let cache_dir = proj_dirs.cache_dir().join(target_hash);
     let rules_dir = target.join(&args.rules_dir);
     let tests_dir = target.join(&args.tests_dir);
+    let scripts_dir = target.join(&args.scripts_dir);
+    let patterns_dir = target.join(&args.patterns_dir);
 
     debug!("Collect all Logstash rules");
     let rules = collect_rules(&rules_dir).context("Collecting all rules")?;
@@ -115,6 +130,24 @@ pub async fn default_runner(args: &DefaultArguments) -> anyhow::Result<()> {
     }
 
     info!("Collected {} test cases", test_cases.len());
+
+    let scripts = if scripts_dir.is_dir() {
+        debug!("Collect all ruby scripts");
+        let scripts = collect_scripts(&scripts_dir).context("Collecting all ruby scripts")?;
+        info!("Collected {} ruby scripts", scripts.len());
+        scripts
+    } else {
+        Vec::default()
+    };
+
+    let patterns = if patterns_dir.is_dir() {
+        debug!("Collect all grok patterns");
+        let patterns = collect_patterns(&patterns_dir).context("Collecting all grok patterns")?;
+        info!("Collected {} grok patterns", patterns.len());
+        patterns
+    } else {
+        Vec::default()
+    };
 
     if !cache_dir.is_dir() {
         debug!("Create a cache directory");
@@ -135,7 +168,7 @@ pub async fn default_runner(args: &DefaultArguments) -> anyhow::Result<()> {
                 .context("Running the event responder server")
                 .unwrap()
         }) => {},
-        e = run_tests(receiver_for_test_runner, cache_dir, rules, test_cases, !args.no_delete_container) => {
+        e = run_tests(receiver_for_test_runner, cache_dir, rules, test_cases, scripts, patterns, !args.no_delete_container) => {
             e.expect("Error running Logstash tests");
         },
     );

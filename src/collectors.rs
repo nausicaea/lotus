@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::runner::TestCase;
-use crate::{EXPECTED_FILE, INPUT_FILE, RULE_EXTENSION};
+use crate::{EXPECTED_FILE, INPUT_FILE, RULE_EXTENSION, SCRIPT_EXTENSION};
 use anyhow::{anyhow, Context};
 use tracing::instrument;
 
@@ -44,31 +44,47 @@ pub fn collect_tests(tests_dir: &Path) -> anyhow::Result<Vec<TestCase>> {
     Ok(test_cases)
 }
 
-#[instrument]
-pub fn collect_rules(rules_dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
-    let mut rules: Vec<PathBuf> = Vec::new();
-    let dir_iter = std::fs::read_dir(rules_dir)
-        .with_context(|| format!("Reading the rules directory: {}", rules_dir.display()))?;
+#[instrument(skip(predicate))]
+fn collect_files<F: Fn(&std::ffi::OsStr) -> bool>(
+    directory: &Path,
+    predicate: F,
+) -> anyhow::Result<Vec<PathBuf>> {
+    let mut files: Vec<PathBuf> = Vec::new();
+    let dir_iter = std::fs::read_dir(directory)
+        .with_context(|| format!("Reading the directory: {}", directory.display()))?;
 
     for dir_entry in dir_iter {
-        let dir_entry = dir_entry.context("Collecting a rule")?;
-        let file_type = dir_entry
-            .file_type()
-            .context("Determining the file type of the rule")?;
+        let dir_entry = dir_entry.context("Collecting a file")?;
+        let file_type = dir_entry.file_type().context("Determining the file type")?;
         if !file_type.is_file() {
             continue;
         }
-        let rule_file = dir_entry.path();
-        match rule_file.extension() {
-            None => continue,
-            Some(ext) if ext != RULE_EXTENSION => continue,
-            _ => (),
+        let file = dir_entry.path();
+        let Some(ext) = file.extension() else {
+            continue;
+        };
+        if !predicate(ext) {
+            continue;
         }
-
-        rules.push(rule_file);
+        files.push(file);
     }
 
-    rules.sort();
+    files.sort();
 
-    Ok(rules)
+    Ok(files)
+}
+
+#[instrument]
+pub fn collect_rules(rules_dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
+    collect_files(rules_dir, |ext| ext == RULE_EXTENSION)
+}
+
+#[instrument]
+pub fn collect_scripts(scripts_dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
+    collect_files(scripts_dir, |ext| ext == SCRIPT_EXTENSION)
+}
+
+#[instrument]
+pub fn collect_patterns(patterns_dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
+    collect_files(patterns_dir, |_| true)
 }

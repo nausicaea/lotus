@@ -26,6 +26,8 @@ impl TestContext {
         receiver: Receiver<Value>,
         cache_dir: PathBuf,
         rules: Vec<PathBuf>,
+        scripts: Vec<PathBuf>,
+        patterns: Vec<PathBuf>,
         delete_container: bool,
     ) -> anyhow::Result<Self> {
         debug!("Connect to the Docker API");
@@ -33,7 +35,7 @@ impl TestContext {
             Docker::connect_with_local_defaults().context("Connecting to the Docker API")?;
 
         debug!("Build the Logstash container image");
-        let image = build_container_image(&docker, &cache_dir, &rules)
+        let image = build_container_image(&docker, &cache_dir, &rules, &scripts, &patterns)
             .await
             .context("Building the Docker container image for Logstash")?;
 
@@ -153,14 +155,23 @@ pub async fn run_tests(
     cache_dir: PathBuf,
     rules: Vec<PathBuf>,
     test_cases: Vec<TestCase>,
+    scripts: Vec<PathBuf>,
+    patterns: Vec<PathBuf>,
     delete_container: bool,
 ) -> anyhow::Result<()> {
     let mut test_result: anyhow::Result<()> = Ok(());
 
     debug!("Create the test environment");
-    let mut context = TestContext::new(receiver, cache_dir, rules, delete_container)
-        .await
-        .context("Bootstrapping the test environment")?;
+    let mut context = TestContext::new(
+        receiver,
+        cache_dir,
+        rules,
+        scripts,
+        patterns,
+        delete_container,
+    )
+    .await
+    .context("Bootstrapping the test environment")?;
 
     for (i, test_case) in test_cases.iter().enumerate() {
         debug!("Run test case {i}: {test_case:?}");
