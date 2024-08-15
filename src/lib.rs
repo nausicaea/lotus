@@ -3,7 +3,7 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::path::PathBuf;
 
 use anyhow::{anyhow, Context};
-use clap::Parser;
+use clap::{ArgAction, Parser};
 use directories::ProjectDirs;
 use tokio::sync::mpsc::channel;
 use tracing::{debug, info, instrument};
@@ -48,6 +48,8 @@ pub struct DefaultArguments {
     /// If set, do not delete the Docker container after completion of the test run
     #[arg(short, long)]
     pub no_delete_container: bool,
+    #[arg(short, long, action = ArgAction::Count)]
+    pub verbose: usize,
     /// Optionally change the location of the Logstash rules
     #[arg(short, long, default_value_t = String::from(RULES_DIR), env = "LOTUS_RULES_DIR")]
     pub rules_dir: String,
@@ -80,6 +82,7 @@ impl Default for DefaultArguments {
         Self {
             target: None,
             no_delete_container: false,
+            verbose: 0,
             rules_dir: String::from(RULES_DIR),
             tests_dir: String::from(TESTS_DIR),
             scripts_dir: String::from(SCRIPTS_DIR),
@@ -168,7 +171,7 @@ pub async fn default_runner(args: &DefaultArguments) -> anyhow::Result<()> {
                 .context("Running the event responder server")
                 .unwrap()
         }) => {},
-        e = run_tests(receiver_for_test_runner, cache_dir, rules, test_cases, scripts, patterns, !args.no_delete_container) => {
+        e = run_tests(receiver_for_test_runner, cache_dir, rules, test_cases, scripts, patterns, !args.no_delete_container, args.verbose > 0) => {
             e.expect("Error running Logstash tests");
         },
     );

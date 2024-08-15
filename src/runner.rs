@@ -85,6 +85,7 @@ pub async fn run_single_test(
     client: &Client,
     receiver: &mut Receiver<Value>,
     test_case: &TestCase,
+    verbose: bool,
 ) -> anyhow::Result<()> {
     debug!("Deserialize the input file as JSON");
     let input = tokio::fs::File::open(&test_case.input)
@@ -137,18 +138,18 @@ pub async fn run_single_test(
                 Err(e) => return Into::<anyhow::Error>::into(e),
             };
 
-            anyhow!(
-                "{}\n\nactual:\n{}\n\nexpected:\n{}",
-                e,
-                &output_json,
-                &expected_json
-            )
+            if verbose {
+                anyhow!("{e}\n\nactual:\n{output_json}\n\nexpected:\n{expected_json}")
+            } else {
+                anyhow!("{e}")
+            }
         })
         .context("Comparing the actual Logstash output (lhs) with the expected output (rhs)")?;
 
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 #[instrument]
 pub async fn run_tests(
     receiver: Receiver<Value>,
@@ -158,6 +159,7 @@ pub async fn run_tests(
     scripts: Vec<PathBuf>,
     patterns: Vec<PathBuf>,
     delete_container: bool,
+    verbose: bool,
 ) -> anyhow::Result<()> {
     let mut test_result: anyhow::Result<()> = Ok(());
 
@@ -175,7 +177,7 @@ pub async fn run_tests(
 
     for (i, test_case) in test_cases.iter().enumerate() {
         debug!("Run test case {i}: {test_case:?}");
-        let r = run_single_test(&context.http_client, &mut context.receiver, test_case)
+        let r = run_single_test(&context.http_client, &mut context.receiver, test_case, verbose)
             .await
             .with_context(|| format!("Running test case {}: {}", i, test_case.input.display()));
 

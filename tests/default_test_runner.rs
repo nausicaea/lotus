@@ -32,9 +32,9 @@ async fn empty_json_objects() -> anyhow::Result<()> {
     for t in &["a", "b", "c", "d"] {
         let test_dir = tests_dir.join(t);
         create_dir(&test_dir)?;
-        let input = File::create(&test_dir.join(input_file))?;
+        let input = File::create(test_dir.join(input_file))?;
         to_writer(input, &input_data)?;
-        let expected = File::create(&test_dir.join(expected_file))?;
+        let expected = File::create(test_dir.join(expected_file))?;
         to_writer(expected, &expected_data)?;
     }
 
