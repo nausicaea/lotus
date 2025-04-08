@@ -22,9 +22,9 @@ assert-json-diff = "2"
 axum = "0.6"
 bollard = "0.16"
 clap = { version = "4", features = ["derive", "env"] }
-directories = "5"
+directories = "6"
 futures-util = "0.3"
-handlebars = { version = "5.0", features = ["rust-embed"] }
+handlebars = { version = "6.0", features = ["rust-embed"] }
 reqwest = { version = "0.12", features = ["json"] }
 rust-embed = "8"
 serde = "1"

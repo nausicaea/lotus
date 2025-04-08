@@ -45,8 +45,8 @@ repository, using the following example:
 ```yaml
 # .pre-commit-config.yaml
 repos:
-  - repo: https://github.com/nausicaea/lotus
-    rev: v0.4.2
+  - repo: https://gitlab.com/nausicaea/lotus
+    rev: v0.4.3
     hooks:
       - id: lotus
 ```
