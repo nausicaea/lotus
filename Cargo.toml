@@ -20,7 +20,7 @@ tempfile = "3"
 anyhow = "1"
 assert-json-diff = "2"
 axum = "0.6"
-bollard = "0.16"
+bollard = "0.18"
 clap = { version = "4", features = ["derive", "env"] }
 directories = "6"
 futures-util = "0.3"
