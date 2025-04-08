@@ -49,7 +49,7 @@ pub struct DefaultArguments {
     #[arg(short, long)]
     pub no_delete_container: bool,
     #[arg(short, long, action = ArgAction::Count)]
-    pub verbose: usize,
+    pub verbose: u8,
     /// Optionally change the location of the Logstash rules
     #[arg(short, long, default_value_t = String::from(RULES_DIR), env = "LOTUS_RULES_DIR")]
     pub rules_dir: String,
