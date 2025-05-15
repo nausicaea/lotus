@@ -36,7 +36,7 @@ sccache:
       - .gitlab/sccache
   cache:
     key: sccache-$VERSION
-    paths: 
+    paths:
       - .gitlab/sccache
 
 nextest:
@@ -58,7 +58,7 @@ nextest:
       - .gitlab/cargo-nextest
   cache:
     key: nextest-$VERSION
-    paths: 
+    paths:
       - .gitlab/cargo-nextest
 
 cargo-vendor:
