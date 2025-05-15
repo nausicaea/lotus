@@ -149,4 +149,3 @@ cargo-test:
     reports:
       junit:
         - target/nextest/ci/junit.xml
-
