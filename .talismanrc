@@ -1,0 +1,6 @@
+fileignoreconfig:
+- filename: .gitlab-ci.yml
+  checksum: 41d2ec5ae483d956692a3e010e3057bd07275a76f8d304797f6dbd1468173051
+- filename: Cargo.lock
+  checksum: 8a5d0b09c661f6edc6371a49f3141573abe167fce17aa51535199a62b2dc0163
+version: "1.0"
