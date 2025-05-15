@@ -3,7 +3,7 @@ use serde_json::{json, to_writer};
 use std::fs::{create_dir, File};
 use std::io::Write;
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn empty_json_objects() -> anyhow::Result<()> {
     let input_data = json! {{}};
     let expected_data = json! {{
@@ -21,20 +21,20 @@ async fn empty_json_objects() -> anyhow::Result<()> {
     let tmp_dir = tempfile::tempdir()?;
 
     // Write the rules
-    let rules_dir = tmp_dir.path().join(&rules_dir);
+    let rules_dir = tmp_dir.path().join(rules_dir);
     create_dir(&rules_dir)?;
-    File::create(&rules_dir.join(&rule_file))?.write_all(rule_data.as_bytes())?;
+    File::create(rules_dir.join(rule_file))?.write_all(rule_data.as_bytes())?;
 
     // Write the tests
-    let tests_dir = tmp_dir.path().join(&tests_dir);
+    let tests_dir = tmp_dir.path().join(tests_dir);
     create_dir(&tests_dir)?;
 
     for t in &["a", "b", "c", "d"] {
         let test_dir = tests_dir.join(t);
         create_dir(&test_dir)?;
-        let input = File::create(&test_dir.join(&input_file))?;
+        let input = File::create(test_dir.join(input_file))?;
         to_writer(input, &input_data)?;
-        let expected = File::create(&test_dir.join(&expected_file))?;
+        let expected = File::create(test_dir.join(expected_file))?;
         to_writer(expected, &expected_data)?;
     }
 

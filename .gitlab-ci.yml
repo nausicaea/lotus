@@ -1,0 +1,152 @@
+stages:
+  - prep
+  - build
+  - test
+
+workflow:
+  rules:
+    - if: $CI_MERGE_REQUEST_IID
+    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+default:
+  image: rust:latest
+  interruptible: true
+
+variables:
+  SCCACHE_DIR: ${CI_PROJECT_DIR}/.cargo/sccache
+  RUSTC_WRAPPER: ${CI_PROJECT_DIR}/.gitlab/sccache
+
+sccache:
+  stage: prep
+  image: alpine:latest
+  script:
+    - wget -O $TARBALL "https://github.com/mozilla/sccache/releases/download/${VERSION}/sccache-${VERSION}-x86_64-unknown-linux-musl.tar.gz"
+    - echo "$SHA256  $TARBALL" > ${TARBALL}.sha256
+    - sha256sum -c $TARBALL.sha256
+    - mkdir -p .gitlab
+    - tar -C .gitlab --strip-components 1 -xf $TARBALL sccache-${VERSION}-x86_64-unknown-linux-musl/sccache
+  variables:
+    TARBALL: sccache.tgz
+    VERSION: v0.8.0
+    SHA256: 2e0e7df61bc7dcf61fd65c1b345d05cd1f832598a15c6f42e7e21f86b8d39b1f
+  artifacts:
+    expire_in: 1 day
+    paths:
+      - .gitlab/sccache
+  cache:
+    key: sccache-$VERSION
+    paths: 
+      - .gitlab/sccache
+
+nextest:
+  stage: prep
+  image: alpine:latest
+  script:
+    - wget -O $TARBALL "https://get.nexte.st/${VERSION}/linux"
+    - echo "$SHA256  $TARBALL" > ${TARBALL}.sha256
+    - sha256sum -c ${TARBALL}.sha256
+    - mkdir -p .gitlab
+    - tar -C .gitlab -xf $TARBALL cargo-nextest
+  variables:
+    TARBALL: nextest.tgz
+    VERSION: 0.9.70
+    SHA256: c2d76b2608ce7c92d95aa016889498f273ecacbb3fcffb83db3385f643aa1a9a
+  artifacts:
+    expire_in: 1 day
+    paths:
+      - .gitlab/cargo-nextest
+  cache:
+    key: nextest-$VERSION
+    paths: 
+      - .gitlab/cargo-nextest
+
+cargo-vendor:
+  stage: prep
+  script:
+    - mkdir -p .cargo
+    - cargo fetch --locked
+    - cargo vendor --locked .cargo/vendor > .cargo/config.toml
+  artifacts:
+    expire_in: 1 day
+    paths:
+      - .cargo/config.toml
+      - .cargo/vendor
+  cache:
+    key:
+      files:
+        - Cargo.lock
+    paths:
+      - .cargo/config.toml
+      - .cargo/vendor
+  needs:
+    - sccache
+
+rust-latest:
+  stage: build
+  script:
+    - cargo build --frozen --offline
+    - .gitlab/sccache --show-stats
+  cache:
+    key: sccache-cargo-build-cache
+    paths:
+      - .cargo/sccache
+  needs:
+    - sccache
+    - cargo-vendor
+
+cargo-check:
+  stage: test
+  script:
+    - cargo check --frozen --offline --workspace
+    - .gitlab/sccache --show-stats
+  cache:
+    key: sccache-cargo-check-cache
+    paths:
+      - .cargo/sccache
+  needs:
+    - sccache
+    - cargo-vendor
+
+rustfmt-check:
+  stage: test
+  script:
+    - rustup component add rustfmt
+    - cargo --frozen --offline fmt -- --check
+  needs:
+    - cargo-vendor
+
+cargo-clippy:
+  stage: test
+  script:
+    - rustup component add clippy
+    - cargo clippy --frozen --offline --all-targets --all-features -- -Dwarnings
+    - .gitlab/sccache --show-stats
+  cache:
+    key: sccache-cargo-clippy-cache
+    paths:
+      - .cargo/sccache
+  needs:
+    - sccache
+    - cargo-vendor
+
+cargo-test:
+  stage: test
+  script:
+    - export PATH=${CI_PROJECT_DIR}/.gitlab:$PATH
+    - cargo nextest run --profile ci --frozen --offline --workspace
+    - .gitlab/sccache --show-stats
+  cache:
+    key: sccache-cargo-test-cache
+    paths:
+      - .cargo/sccache
+  needs:
+    - sccache
+    - nextest
+    - cargo-vendor
+  artifacts:
+    when: always
+    reports:
+      junit:
+        - target/nextest/ci/junit.xml
+

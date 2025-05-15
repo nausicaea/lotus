@@ -24,12 +24,6 @@ repos:
       - id: check-vcs-permalinks
       - id: forbid-submodules
 
-  - repo: https://github.com/doublify/pre-commit-rust
-    rev: v1.0
-    hooks:
-      - id: fmt
-      - id: cargo-check
-
   - repo: https://github.com/thoughtworks/talisman
     rev: v1.37.0
     hooks:
@@ -40,3 +34,53 @@ repos:
     rev: v4.7.0
     hooks:
       - id: commitizen
+
+  - repo: local
+    hooks:
+      - id: cargo-nextest
+        name: Cargo Nextest
+        entry: cargo nextest run
+        pass_filenames: false
+        language: system
+        types: [rust]
+        stages: [pre-commit]
+
+      - id: cargo-check
+        name: Cargo Check
+        entry: cargo check
+        pass_filenames: false
+        language: system
+        types: [rust]
+        stages: [pre-commit]
+
+      - id: cargo-clippy
+        name: Cargo Clippy (with warnings)
+        entry: cargo clippy -- -D warnings
+        pass_filenames: false
+        language: system
+        types: [rust]
+        stages: [pre-commit]
+
+      - id: cargo-fmt-check
+        name: Cargo Format (check)
+        entry: cargo fmt -- --check
+        pass_filenames: false
+        language: system
+        types: [rust]
+        stages: [pre-commit]
+
+      - id: cargo-clippy-fix
+        name: Cargo Clippy
+        entry: cargo clippy --fix
+        pass_filenames: false
+        language: system
+        types: [rust]
+        stages: [pre-push]
+
+      - id: cargo-fmt
+        name: Cargo Format
+        entry: cargo fmt
+        pass_filenames: false
+        language: system
+        types: [rust]
+        stages: [pre-push]
