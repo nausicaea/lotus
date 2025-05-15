@@ -177,9 +177,14 @@ pub async fn run_tests(
 
     for (i, test_case) in test_cases.iter().enumerate() {
         debug!("Run test case {i}: {test_case:?}");
-        let r = run_single_test(&context.http_client, &mut context.receiver, test_case, verbose)
-            .await
-            .with_context(|| format!("Running test case {}: {}", i, test_case.input.display()));
+        let r = run_single_test(
+            &context.http_client,
+            &mut context.receiver,
+            test_case,
+            verbose,
+        )
+        .await
+        .with_context(|| format!("Running test case {}: {}", i, test_case.input.display()));
 
         match r {
             Ok(()) => (),
