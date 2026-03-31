@@ -2,7 +2,7 @@ use std::hash::{Hash, Hasher};
 use std::net::{IpAddr, Ipv4Addr};
 use std::path::PathBuf;
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use clap::{ArgAction, Parser};
 use directories::ProjectDirs;
 use tokio::sync::mpsc::channel;

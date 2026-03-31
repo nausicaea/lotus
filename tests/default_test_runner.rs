@@ -1,6 +1,6 @@
-use lotus::{default_runner, DefaultArguments};
+use lotus::{DefaultArguments, default_runner};
 use serde_json::{json, to_writer};
-use std::fs::{create_dir, File};
+use std::fs::{File, create_dir};
 use std::io::Write;
 
 #[test_log::test(tokio::test)]

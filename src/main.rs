@@ -8,7 +8,7 @@
 use anyhow::Context;
 use clap::Parser;
 
-use lotus::{default_runner, DefaultArguments};
+use lotus::{DefaultArguments, default_runner};
 use tracing::debug;
 
 #[tokio::main]

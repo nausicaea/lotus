@@ -4,12 +4,12 @@ use assert_json_diff::assert_json_matches_no_panic;
 use bollard::Docker;
 use reqwest::Client;
 
-use anyhow::{anyhow, Context};
-use serde_json::{from_reader, Value};
+use anyhow::{Context, anyhow};
+use serde_json::{Value, from_reader};
 use tokio::sync::mpsc::Receiver;
-use tracing::{debug, info_span, instrument, Instrument};
+use tracing::{Instrument, debug, info_span, instrument};
 
-use crate::docker::{build_container_image, create_container, healthy, Container};
+use crate::docker::{Container, build_container_image, create_container, healthy};
 use crate::{INPUT_PORT, LOCALHOST};
 
 #[derive(Debug)]

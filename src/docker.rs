@@ -5,21 +5,24 @@ use std::{
     time::Duration,
 };
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use bollard::{
-    body_full, models::{BuildInfo, HealthStatusEnum, HostConfig, ImageId, PortBinding}, plugin::ContainerCreateBody, query_parameters::BuildImageOptions
+    body_full,
+    models::{BuildInfo, HealthStatusEnum, HostConfig, ImageId, PortBinding},
+    plugin::ContainerCreateBody,
+    query_parameters::BuildImageOptions,
 };
 use futures_util::stream::StreamExt;
 use tokio::time::sleep;
 use tracing::instrument;
 
 use crate::{
-    assets::{ConfigAssets, PipelineAssets},
-    PATTERNS_DIR, SCRIPTS_DIR,
-};
-use crate::{
     API_PORT, FQAN, IMAGE_ARCHIVE_NAME, INPUT_PORT, INPUT_TEMPLATE_NAME, LOCALHOST, OUTPUT_PORT,
     OUTPUT_TEMPLATE_NAME, PIPELINE_NAME,
+};
+use crate::{
+    PATTERNS_DIR, SCRIPTS_DIR,
+    assets::{ConfigAssets, PipelineAssets},
 };
 
 #[derive(Debug, Clone)]
@@ -218,14 +221,14 @@ pub async fn build_container_image(
                     "Docker stream error when building image {}: {}",
                     &image_tag,
                     error
-                ))
+                ));
             }
             Err(e) => {
                 return Err(anyhow!(
                     "Unspecified error building image {}: {}",
                     &image_tag,
                     e
-                ))
+                ));
             }
         }
     }

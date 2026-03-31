@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use crate::runner::TestCase;
 use crate::{EXPECTED_FILE, INPUT_FILE, RULE_EXTENSION, SCRIPT_EXTENSION};
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use tracing::instrument;
 
 #[instrument]

@@ -1,9 +1,9 @@
 use std::net::SocketAddr;
 
 use anyhow::Context;
-use axum::{extract::State, http::StatusCode, Json};
+use axum::{Json, extract::State, http::StatusCode};
 use tokio::sync::mpsc::Sender;
-use tracing::{debug, info_span, instrument, Instrument};
+use tracing::{Instrument, debug, info_span, instrument};
 
 use crate::OUTPUT_PORT;
 
@@ -46,7 +46,6 @@ pub async fn run_server(sender: Sender<serde_json::Value>) -> anyhow::Result<()>
     axum::serve(listener, app)
         .await
         .context("When running the event responder server")?;
-
 
     Ok(())
 }
