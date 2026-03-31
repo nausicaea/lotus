@@ -46,7 +46,7 @@ impl TestContext {
 
         debug!("Start the Logstash container");
         docker
-            .start_container::<String>(&container.id, None)
+            .start_container(&container.id, None)
             .await
             .context("Starting the Logstash Docker container")?;
 

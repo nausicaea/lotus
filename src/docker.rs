@@ -7,9 +7,7 @@ use std::{
 
 use anyhow::{anyhow, Context};
 use bollard::{
-    container::Config,
-    image::BuildImageOptions,
-    models::{BuildInfo, HealthStatusEnum, HostConfig, ImageId, PortBinding},
+    body_full, models::{BuildInfo, HealthStatusEnum, HostConfig, ImageId, PortBinding}, plugin::ContainerCreateBody, query_parameters::BuildImageOptions
 };
 use futures_util::stream::StreamExt;
 use tokio::time::sleep;
@@ -196,13 +194,13 @@ pub async fn build_container_image(
         .and_then(|f| f.to_str())
         .ok_or(anyhow!("Cannot determine the name of the cache directory"))?;
     let image_tag = format!("{}/{}-{}:latest", FQAN[1], FQAN[2], cache_name);
-    let mut builder_stream = docker.build_image::<String>(
+    let mut builder_stream = docker.build_image(
         BuildImageOptions {
-            t: image_tag.clone(),
+            t: Some(image_tag.clone()),
             ..Default::default()
         },
         None,
-        Some(archive_buffer.into()),
+        Some(body_full(archive_buffer.into())),
     );
 
     let mut image_id: Option<Image> = None;
@@ -242,9 +240,9 @@ pub async fn create_container(
     delete_container: bool,
 ) -> anyhow::Result<Container> {
     let response = docker
-        .create_container::<String, String>(
+        .create_container(
             None,
-            Config {
+            ContainerCreateBody {
                 image: Some(image.id.clone()),
                 attach_stdout: Some(true),
                 attach_stderr: Some(true),
