@@ -3,7 +3,7 @@ name = "lotus"
 description = "Lotus Logstash Test Runner"
 authors = ["Eleanor Young <developer@nausicaea.net>"]
 version = "0.4.3"
-edition = "2021"
+edition = "2024"
 readme = "README.md"
 license = "MIT OR Apache-2.0"
 
@@ -19,13 +19,13 @@ path = "src/main.rs"
 tempfile = "3"
 anyhow = "1"
 assert-json-diff = "2"
-axum = "0.6"
-bollard = "0.18"
+axum = "0.8"
+bollard = "0.20"
 clap = { version = "4", features = ["derive", "env"] }
 directories = "6"
 futures-util = "0.3"
 handlebars = { version = "6.0", features = ["rust-embed"] }
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.13", features = ["json"] }
 rust-embed = "8"
 serde = "1"
 serde_json = "1"
