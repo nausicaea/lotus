@@ -35,19 +35,18 @@ async fn root(
 pub async fn run_server(sender: Sender<serde_json::Value>) -> anyhow::Result<()> {
     let bind_addr = SocketAddr::from(([0, 0, 0, 0], OUTPUT_PORT));
     let state = ServerState { sender };
-    let response_handler_span = info_span!("response_handler");
+
+    let app = axum::Router::new()
+        .route("/", axum::routing::post(root))
+        .with_state(state);
 
     debug!("Bind the axum server to {bind_addr}");
-    axum::Server::bind(&bind_addr)
-        .serve(
-            axum::Router::new()
-                .route("/", axum::routing::post(root))
-                .with_state(state)
-                .into_make_service(),
-        )
-        .instrument(response_handler_span)
+    let listener = tokio::net::TcpListener::bind(bind_addr).await?;
+
+    axum::serve(listener, app)
         .await
         .context("When running the event responder server")?;
+
 
     Ok(())
 }
