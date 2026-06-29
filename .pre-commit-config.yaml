@@ -2,7 +2,7 @@
 fail_fast: true
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
+    rev: v6.0.0
     hooks:
       # These will modify code
       - id: trailing-whitespace
@@ -31,7 +31,7 @@ repos:
       - id: talisman-commit
 
   - repo: https://github.com/commitizen-tools/commitizen
-    rev: v4.7.0
+    rev: v4.16.4
     hooks:
       - id: commitizen
 
