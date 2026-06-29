@@ -2,7 +2,7 @@
 name = "lotus"
 description = "Lotus Logstash Test Runner"
 authors = ["Eleanor Young <developer@nausicaea.net>"]
-version = "0.4.4"
+version = "0.4.5"
 edition = "2024"
 readme = "README.md"
 license = "MIT OR Apache-2.0"
@@ -20,7 +20,7 @@ tempfile = "3"
 anyhow = "1"
 assert-json-diff = "2"
 axum = "0.8"
-bollard = "0.20"
+bollard = "0.21"
 clap = { version = "4", features = ["derive", "env"] }
 directories = "6"
 futures-util = "0.3"
