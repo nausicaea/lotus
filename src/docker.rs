@@ -251,6 +251,7 @@ pub async fn create_container(
                 attach_stderr: Some(true),
                 host_config: Some(HostConfig {
                     auto_remove: Some(delete_container),
+                    extra_hosts: Some(vec!["host.docker.internal:host-gateway".to_string()]),
                     port_bindings: Some(
                         [INPUT_PORT, API_PORT]
                             .into_iter()
