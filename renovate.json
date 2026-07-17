@@ -3,6 +3,7 @@
     "extends": [
         "config:recommended"
     ],
+    "assignees": ["nausicaea"],
     "packageRules": [
         {
             "minimumReleaseAge": "7d",
