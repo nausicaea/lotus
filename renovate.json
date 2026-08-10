@@ -1,15 +1,13 @@
 {
     "$schema": "https://docs.renovatebot.com/renovate-schema.json",
     "extends": [
-        "config:recommended"
+        "config:best-practices"
     ],
     "assignees": ["nausicaea"],
-    "packageRules": [
-        {
-            "minimumReleaseAge": "7d",
-            "matchPackageNames": [
-                "*"
-            ]
-        }
-    ]
+    "minimumReleaseAge": "7d",
+    "rangeStrategy": "pin",
+    "lockFileMaintenance": {
+        "enabled": true,
+        "schedule": ["on monday"]
+    }
 }
