@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM docker.elastic.co/logstash/logstash:9.4.3
+FROM docker.elastic.co/logstash/logstash:9.4.2@sha256:532fa8633866e231d14b8e8860488f224f7f354bc63b43b099ddf2a3a87e2845
 HEALTHCHECK CMD curl -s "http://127.0.0.1:{{ api_port }}" | grep "green"
 EXPOSE {{ api_port }}/tcp {{ input_port }}/tcp
 RUN bin/logstash-plugin install logstash-filter-json_encode

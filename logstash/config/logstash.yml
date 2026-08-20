@@ -1,5 +1,5 @@
 ---
-http.host: "0.0.0.0"
+api.http.host: "0.0.0.0"
 # automatic reloading will not work with stdin input
 config.reload.automatic: false
 xpack.monitoring.enabled: false
