@@ -219,14 +219,14 @@ pub async fn build_container_image(
             Err(bollard::errors::Error::DockerStreamError { error }) => {
                 return Err(anyhow!(
                     "Docker stream error when building image {}: {}",
-                    &image_tag,
+                    image_tag,
                     error
                 ));
             }
             Err(e) => {
                 return Err(anyhow!(
                     "Unspecified error building image {}: {}",
-                    &image_tag,
+                    image_tag,
                     e
                 ));
             }
