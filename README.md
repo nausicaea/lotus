@@ -43,6 +43,9 @@ repos:
     rev: v0.4.3
     hooks:
       - id: lotus
+        args:
+          - "--no-delete-container"
+          - "--verbose"
 ```
 
 Finally, continue following the [Pre-Commit

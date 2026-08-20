@@ -219,14 +219,14 @@ pub async fn build_container_image(
             Err(bollard::errors::Error::DockerStreamError { error }) => {
                 return Err(anyhow!(
                     "Docker stream error when building image {}: {}",
-                    &image_tag,
+                    image_tag,
                     error
                 ));
             }
             Err(e) => {
                 return Err(anyhow!(
                     "Unspecified error building image {}: {}",
-                    &image_tag,
+                    image_tag,
                     e
                 ));
             }
@@ -251,6 +251,7 @@ pub async fn create_container(
                 attach_stderr: Some(true),
                 host_config: Some(HostConfig {
                     auto_remove: Some(delete_container),
+                    extra_hosts: Some(vec!["host.docker.internal:host-gateway".to_string()]),
                     port_bindings: Some(
                         [INPUT_PORT, API_PORT]
                             .into_iter()
