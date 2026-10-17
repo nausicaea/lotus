@@ -2,7 +2,7 @@
 name = "lotus"
 description = "Lotus Logstash Test Runner"
 authors = ["Eleanor Young <developer@nausicaea.net>"]
-version = "0.5.2"
+version = "0.6.0"
 edition = "2024"
 readme = "README.md"
 license = "MIT OR Apache-2.0"
