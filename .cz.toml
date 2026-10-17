@@ -1,6 +1,6 @@
 [tool.commitizen]
 name = "cz_conventional_commits"
-tag_format = "v$version"
+tag_format = "v$version+9.4.2"
 version_scheme = "semver2"
 version_provider = "cargo"
 update_changelog_on_bump = true
