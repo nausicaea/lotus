@@ -1,3 +1,20 @@
+## v0.7.0+9.4.2 (2026-11-12)
+
+### Fix
+
+- **pre-commit**: move over to the Github repo mirror for my custom pre-commit hooks (#90)
+- **deps**: update rust crate tokio to v1.54.1 (#83)
+- **deps**: update tokio to 1.53.3 due to RUSTSEC-2026-0386
+- **versioning**: move the build metadata out of the tag_format field into a dedicated command line parameter
+- **deps**: update rust crate serde_json to v1.0.154 (#80)
+- **deps**: update rust crate serde_json to v1.0.152 (#79)
+
+## v0.6.0+9.4.2 (2026-10-17)
+
+### Fix
+
+- **versioning**: add the Logstash version as build info to the version itself
+
 ## v0.5.2 (2026-10-17)
 
 ### Fix
